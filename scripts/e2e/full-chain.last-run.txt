@@ -1,0 +1,69 @@
+======================================================================
+ 鱼缸小镇 · P1 全链路端到端验收：鱼自己赚钱又花钱（插件 + 服务端 + web）
+======================================================================
+运行时间   : 2026-11-14T02:53:12.630Z  (Asia/Shanghai 2026/11/14 10:53:12)
+Node 版本  : v24.22.2
+验证命令   : node scripts/e2e/full-chain.mjs
+
+临时 DB    : /tmp/fishbowl-e2e-LsUyxI/e2e.db
+服务端     : http://127.0.0.1:46269  （Fastify · 临时库 · 随机端口 46269 · 真种子 + 主人/公开/静态）
+DSH_HOME   : /tmp/fishbowl-fullchain-home-W9bgHR
+
+[1] 造鱼 + 挂真插件 → 真服务端
+    fish_id=f_5ae173e63a942a4a  昵称=小圆子  初始余额=100 鱼币  接入码=fbr_b7dba…4a11（脱敏）
+    插件已 apply（base=http://127.0.0.1:46269/town/api/resident/，preset=fishbowl-town，零工具只带人设）；真长轮询已启动
+
+[2] 真实 agency 回合往返（插件长轮询取 turn → 她的模型 → POST turns/:id 交回）
+    服务端 turn turn_480edcd83c046b03 已被插件回答；answer={"action":"none","note":"先看看有什么活可以干","next_wake":30}
+    她的模型被调用 1 次（样例：「【鱼缸小镇 · 该你自己拿主意了】 · 20 秒内回答 小镇不替你安排：去不去打牌、找谁串门、还」）
+    ✅ 插件确实取到并回答了一个真实 agency 回合
+    ✅ 回答内容来自她的模型（JSON 决策） — {"action":"none","note":"先看看有什么活可以干","next_wake":30}
+
+    ✅ /town jobs 能打到真服务端并列出招工 — 现在能接的活（填标题或编号接）：
+[3] 她赚钱（真插件命令 → 真服务端 → 真 ledger）
+    /town jobs → 现在能接的活（填标题或编号接）： / - 码头帮工（job_169f385be071ee52）：20 鱼币，30 分钟，在 码头，还缺 3 人（有力气、不晕船） / - 咖啡店店员（job_3ded0170be2c6551）：15 鱼币，60 分钟，在 咖啡店，还缺 2 人（会笑、记得住熟客）
+    ✅ /town work 接活成功 — 接了「码头帮工」，工钱 20 鱼币，30 分钟后结算，余额 100 鱼币。到点小镇自动把工钱结算给你；想提前不干就辞掉。
+    /town work 码头帮工 → 接了「码头帮工」，工钱 20 鱼币，30 分钟后结算，余额 100 鱼币。到点小镇自动把工钱结算给你；想提前不干就辞掉。
+    ✅ 到期结算把工钱记入余额 — 100→120（+20，合同 pay=20）
+    settleDueJobs 结算「码头帮工」：余额 100 → 120（+20）；settledJobs=1
+    /town go pier fish #1 → 到码头了：{"item":"小鱼","qty":1,"catch_id":"catch_d08c2ba9e200c331","produce（库内 catch=1）
+    /town go pier fish #2 → 到码头了：{"item":"小鱼","qty":1,"catch_id":"catch_885cbbf04d360192","produce（库内 catch=2）
+    /town go pier fish #3 → 到码头了：{"item":"小鱼","qty":1,"catch_id":"catch_be5a665b9efc5a34","produce（库内 catch=3）
+    ✅ /town market 能看到鱼获与市场价 — 你手上的鱼获： - 小鱼 × 3 市场价：小鱼 5 鱼币（你有 3）、鲫鱼 8 鱼币、鲤鱼 12 鱼币、草鱼 15 鱼币、鲈鱼 20 鱼币、黄鱼 25 鱼币、大青鱼 30 鱼币、龙
+    /town market → 你手上的鱼获： - 小鱼 × 3 市场价：小鱼 5 鱼币（你有 3）、鲫鱼 8 鱼币、鲤鱼 12 鱼币、草鱼 15 鱼币、鲈鱼 20 鱼币、黄鱼 25 鱼币、大青鱼 30 鱼币、龙虾 40 鱼币、螃蟹 45 鱼币、珍珠 
+    ✅ /town sell 卖鱼获把钱记入余额 — 120→135（+15）
+    /town sell 小鱼 3 → 卖了 小鱼×3，得了 15 鱼币，余额 135 鱼币。
+
+[4] 她花钱：入座费（seat_fee）——经服务端座位费领域通道扣除（P1 插件尚未接游戏入座付费接口）
+    ✅ 入座费从余额扣除 — 135→123（-12）
+    paySeatFee(fee=12, ref=table_e2e) → 余额 135 → 123（-12）
+    ✅ /town status 返回余额与今日赚/花（鱼币） — 小圆子 在小镇：active 余额 123 鱼币 · 今日赚 35 鱼币 · 今日花 12 鱼币 下次拿主意：11:23（北京时间，30 分钟后），她打算「先看看有什么活可以干」 在小镇花的钱：今天 
+    /town status → 小圆子 在小镇：active 余额 123 鱼币 · 今日赚 35 鱼币 · 今日花 12 鱼币 下次拿主意：11:23（北京时间，30 分钟后），她打算「先看看有什么活可以干」 在小镇花的钱：今天 ¥12.00 · 7 天 ¥12.00 
+
+[5] 账本对账（真 ledger：SUM(delta)==fish.balance）
+    id  delta   balance_after  reason      ref                 
+    7   +100    100            init        start               
+    8   +20     120            job         jc_d00d705422d60848 
+    9   +15     135            fish_sell   小鱼                  
+    10  -12     123            seat_fee    table_e2e           
+    ✅ 账本含赚 reason=job — job=+20
+    ✅ 账本含赚 reason=fish_sell — fish_sell=+15
+    ✅ 账本含花 reason=seat_fee — seat_fee=-12
+    ✅ SUM(ledger.delta)==fish.balance — SUM=123 balance=123 verify=true
+----------------------------------------
+    她赚了多少：job +20 + fish_sell +15 = +35 鱼币
+    她花了多少：seat_fee -12 = -12 鱼币
+    余额变化：100 → 123（净 +23）；账本 SUM=123 == 余额 123 ✔
+
+[6] web 面板（真服务端静态托管 + 公开只读 API 真实数据）
+    ✅ GET / 首屏 HTML 200 且含 #root — status=200 bytes=398
+    ✅ 静态资源（/assets/*.js）可服务 — asset=/assets/index-C0hihsKA.js bytes=196610
+    GET / → 200，标题「鱼缸小镇 · 自建版」；静态 /assets/index-C0hihsKA.js → 200（196610 bytes）
+    ✅ GET /api/public/town 返回真实小镇数据 — 镇名=鱼缸小镇 onlineFish=7 totalFish=7 今日 net=23
+    ✅ GET /api/public/fish/:id 返回真实名片+流水+stats — 余额=123 流水=4 条 stats.entries=4
+    GET /api/public/town → 200：镇「鱼缸小镇」在线 7/7，今日赚/花/净 35/12/23，动态 10 条
+    GET /api/public/fish/:id → 200：「小圆子」余额 123，流水 4 条，stats={todayEarned:35, todaySpent:12, totalEarned:35, totalSpent:12}
+
+======================================================================
+✅ 全链路通过：她赚了 +35 鱼币、花了 -12 鱼币，余额 100→123，账本 SUM==余额；插件/服务端/web 均真实联通。
+======================================================================

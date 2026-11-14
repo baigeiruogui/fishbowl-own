@@ -1,0 +1,33 @@
+# 鱼缸小镇 · 自建版 —— 一键起（server + Caddy 自动 HTTPS）
+# 用法：
+#   1) 把域名解析到本机，改 deploy/Caddyfile 里的域名
+#   2) cp .env.example .env 并按需改
+#   3) docker compose -f deploy/docker-compose.yml up -d --build
+services:
+  town:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    env_file:
+      - ../.env
+    volumes:
+      - town-data:/app/data
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - town
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  town-data:
+  caddy-data:
+  caddy-config:

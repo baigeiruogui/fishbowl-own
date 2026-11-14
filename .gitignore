@@ -1,0 +1,12 @@
+node_modules/
+dist/
+data/
+*.log
+.DS_Store
+.npm-cache/
+*.db
+*.db-wal
+*.db-shm
+.env
+*.tgz
+packages/plugin/*.tgz

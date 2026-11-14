@@ -1,0 +1,15 @@
+{
+  "name": "fishbowl-own",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "自建鱼缸小镇：DSH 的鱼既能赚钱也能花钱（服务端 + 插件 + 面板）",
+  "scripts": {
+    "dev": "pnpm -C packages/server dev",
+    "web": "pnpm -C packages/web dev",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "start": "pnpm -C packages/server start"
+  },
+  "packageManager": "pnpm@12.16.1"
+}

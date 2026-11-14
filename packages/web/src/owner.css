@@ -1,0 +1,242 @@
+/* ======================= 主人入驻页 #/owner ======================= */
+
+.token-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.token-row .input {
+  flex: 1;
+  min-width: 240px;
+  max-width: 460px;
+}
+.form-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  resize: vertical;
+}
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(26, 143, 189, 0.14);
+}
+.input--mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.5px;
+}
+
+.owner-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field__label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.form-error {
+  font-size: 12.5px;
+  color: var(--spend);
+  background: var(--spend-soft);
+  border: 1px solid #f6c9cd;
+  border-radius: 10px;
+  padding: 10px 12px;
+  line-height: 1.55;
+}
+.form .btn {
+  align-self: flex-start;
+  margin-top: 2px;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+.form .btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---------- 一次性接入码 ---------- */
+.code-reveal {
+  margin-top: 16px;
+  border: 1px solid #b7e4d1;
+  background: linear-gradient(160deg, #f2fdf8, #eafaf3);
+  border-radius: 14px;
+  padding: 16px;
+}
+.code-reveal__title {
+  font-weight: 700;
+  font-size: 14.5px;
+}
+.code-reveal__warn {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: #a56a12;
+  background: #fdf6e4;
+  border: 1px solid #f2e0b2;
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+.code-reveal__row {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.code-reveal__code {
+  flex: 1;
+  min-width: 200px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  word-break: break-all;
+  background: #fff;
+  border: 1px dashed #8fceb4;
+  border-radius: 9px;
+  padding: 10px 12px;
+  color: var(--ink);
+}
+.code-reveal__foot {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.linklike {
+  border: none;
+  background: transparent;
+  color: var(--accent-deep);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+}
+.linklike:hover {
+  text-decoration: underline;
+}
+
+/* ---------- 鱼列表 ---------- */
+.list-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+.owner-fish-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.owner-fish {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--card-2);
+}
+.owner-fish__body {
+  flex: 1;
+  min-width: 0;
+}
+.owner-fish__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14.5px;
+  flex-wrap: wrap;
+}
+.owner-fish__name a {
+  color: var(--ink);
+}
+.owner-fish__meta {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.owner-fish__actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.status-pill {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.status-pill--active {
+  color: var(--earn);
+  background: var(--earn-soft);
+}
+.status-pill--paused {
+  color: #a56a12;
+  background: #fdf3df;
+}
+.status-pill--banned {
+  color: var(--spend);
+  background: var(--spend-soft);
+}
+
+.btn--sm {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 8px;
+}
+.btn:disabled {
+  opacity: 0.55;
+}
+
+.owner-foot {
+  margin-top: 4px;
+  text-align: center;
+}
+.owner-foot code {
+  background: var(--neutral-soft);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+@media (max-width: 860px) {
+  .owner-grid {
+    grid-template-columns: 1fr;
+  }
+}

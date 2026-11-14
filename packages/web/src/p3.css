@@ -1,0 +1,564 @@
+/* ======================= P3 页面：法庭 / 关系 / 小手机 ======================= */
+
+/* 导航项变多：允许换行 */
+.topnav {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 4px;
+}
+
+/* ---------- 法庭 ---------- */
+.court-cols {
+  grid-template-columns: 0.95fr 1.15fr;
+}
+.court-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.court-case {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 13px 14px;
+  background: var(--card-2);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+.court-case:hover {
+  border-color: #b9dced;
+  background: #f6fbfe;
+}
+.court-case--active {
+  border-color: var(--accent);
+  background: #eef9fe;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.court-case__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.court-case__title {
+  font-weight: 700;
+  font-size: 14.5px;
+}
+.court-case__parties {
+  margin-top: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.court-party--plaintiff {
+  color: var(--accent-deep);
+}
+.court-party--defendant {
+  color: var(--spend);
+}
+.court-vs {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.court-case__meta {
+  margin-top: 7px;
+  font-size: 11.5px;
+  color: var(--muted);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.court-state {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.court-state--filed,
+.court-state--evidence {
+  color: #a56a12;
+  background: #fdf3df;
+}
+.court-state--hearing {
+  color: var(--accent-deep);
+  background: #e4f4fb;
+}
+.court-state--judged {
+  color: var(--earn);
+  background: var(--earn-soft);
+}
+.court-state--dismissed {
+  color: var(--muted);
+  background: var(--neutral-soft);
+}
+
+.court-detail__title {
+  margin: 0 0 10px;
+  font-size: 19px;
+}
+.court-detail__parties {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  padding: 10px 0 14px;
+  border-bottom: 1px dashed var(--line);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.court-detail__label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.timeline {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0 0 0 4px;
+}
+.timeline__item {
+  display: flex;
+  gap: 12px;
+  padding-bottom: 16px;
+  position: relative;
+}
+.timeline__item:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 28px;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(180deg, #d7e7ef, #e9f2f7);
+}
+.timeline__dot {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #eef7fc;
+  border: 1px solid var(--line);
+  z-index: 1;
+  font-size: 15px;
+}
+.timeline__item--verdict .timeline__dot {
+  background: var(--earn-soft);
+  border-color: #bfe9d8;
+}
+.timeline__body {
+  flex: 1;
+  padding-top: 2px;
+}
+.timeline__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.timeline__title {
+  font-weight: 700;
+  font-size: 14px;
+}
+.timeline__time {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.timeline__detail {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  line-height: 1.65;
+}
+.verdict {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin-top: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--earn-soft);
+  border: 1px solid #bfe9d8;
+  font-size: 13.5px;
+}
+.verdict__label {
+  font-weight: 700;
+  color: var(--earn);
+  flex: none;
+}
+
+/* ---------- 关系 ---------- */
+.crush-panel {
+  background: linear-gradient(140deg, #ffffff, #fdeef4 70%, #fdf6f9);
+  border-color: #f4d6e2;
+}
+.crush {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.crush__body {
+  flex: 1;
+}
+.crush__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 19px;
+  font-weight: 800;
+}
+.crush__name a {
+  color: var(--ink);
+}
+.crush__heart {
+  font-size: 17px;
+}
+.crush__note {
+  margin-top: 5px;
+  font-size: 13px;
+  color: #b0537a;
+}
+
+.friend-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.friend-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card-2);
+  color: var(--ink);
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+.friend-card:hover {
+  text-decoration: none;
+  border-color: #b9dced;
+  transform: translateY(-1px);
+}
+.friend-card__name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 700;
+  font-size: 14px;
+}
+.friend-card__note {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.plan-card {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 12px;
+  padding: 12px 15px;
+  background: var(--card-2);
+}
+.plan-card--done {
+  border-left-color: var(--earn);
+  opacity: 0.85;
+}
+.plan-card--cancelled {
+  border-left-color: var(--muted);
+  opacity: 0.7;
+}
+.plan-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.plan-card__title {
+  font-weight: 700;
+  font-size: 14.5px;
+}
+.plan-card__meta {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+.plan-status {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.plan-status--planned {
+  color: var(--accent-deep);
+  background: #e4f4fb;
+}
+.plan-status--done {
+  color: var(--earn);
+  background: var(--earn-soft);
+}
+.plan-status--cancelled {
+  color: var(--muted);
+  background: var(--neutral-soft);
+}
+
+/* ---------- 小手机 ---------- */
+.phone-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 18px;
+  align-items: start;
+}
+.phone-convs {
+  padding-bottom: 12px;
+}
+.conv-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.conv {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.conv:hover {
+  background: #f4fafd;
+}
+.conv--active {
+  background: #e9f7fe;
+  border-color: #cbe6f2;
+}
+.conv__body {
+  flex: 1;
+  min-width: 0;
+}
+.conv__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.conv__name {
+  font-weight: 700;
+  font-size: 13.5px;
+}
+.conv__time {
+  font-size: 10.5px;
+  color: var(--muted);
+  flex: none;
+}
+.conv__preview {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conv__unread {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--spend);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+
+.phone-chat {
+  min-height: 420px;
+}
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.chat__head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--line);
+}
+.chat__name {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--ink);
+}
+.chat__sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.chat__bubbles {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 4px;
+  min-height: 240px;
+}
+.bubble-row {
+  display: flex;
+}
+.bubble-row--me {
+  justify-content: flex-end;
+}
+.bubble-row--them {
+  justify-content: flex-start;
+}
+.bubble {
+  max-width: 74%;
+  padding: 9px 12px;
+  border-radius: 14px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.bubble--them {
+  background: #f1f6f9;
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 5px;
+}
+.bubble--me {
+  background: linear-gradient(135deg, #1a8fbd, #16a97b);
+  color: #fff;
+  border-bottom-right-radius: 5px;
+}
+.bubble__time {
+  margin-top: 4px;
+  font-size: 10px;
+  opacity: 0.7;
+  text-align: right;
+}
+.chat__composer {
+  display: flex;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+.chat__composer .input {
+  flex: 1;
+  background: #f8fbfd;
+}
+.chat__composer .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.date-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.date-card {
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--accent);
+  border-radius: 14px;
+  padding: 14px 15px;
+  background: var(--card-2);
+}
+.date-card--done {
+  border-top-color: var(--earn);
+  opacity: 0.85;
+}
+.date-card--cancelled {
+  border-top-color: var(--muted);
+  opacity: 0.7;
+}
+.date-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.date-card__title {
+  font-weight: 700;
+  font-size: 14.5px;
+}
+.date-card__with {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.date-card__with a {
+  color: var(--ink);
+}
+.date-card__meta {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.date-card__note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  background: #fdf8ec;
+  border: 1px solid #f3e6c8;
+  border-radius: 8px;
+  padding: 6px 9px;
+}
+
+@media (max-width: 860px) {
+  .court-cols {
+    grid-template-columns: 1fr;
+  }
+  .phone-layout {
+    grid-template-columns: 1fr;
+  }
+  .phone-convs {
+    order: 1;
+  }
+  .phone-chat {
+    order: 2;
+  }
+}

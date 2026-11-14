@@ -1,0 +1,106 @@
+import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
+import type { DataSource } from '../api.ts'
+import { fmtDelta, isImageAvatar } from '../format.ts'
+
+export function Avatar({ avatar, name, size = 48 }: { avatar: string; name: string; size?: number }) {
+  const style = { width: size, height: size, fontSize: Math.round(size * 0.55) }
+  if (avatar && isImageAvatar(avatar)) {
+    return <img className="avatar" style={style} src={avatar} alt={name} loading="lazy" />
+  }
+  return (
+    <span className="avatar avatar--emoji" style={style} role="img" aria-label={name}>
+      {avatar || name.slice(0, 1)}
+    </span>
+  )
+}
+
+export function Stat({
+  label,
+  value,
+  unit,
+  tone = 'neutral',
+  hint,
+}: {
+  label: string
+  value: ReactNode
+  unit?: string
+  tone?: 'neutral' | 'earn' | 'spend' | 'accent'
+  hint?: string
+}) {
+  return (
+    <div className={`stat stat--${tone}`}>
+      <div className="stat__label">{label}</div>
+      <div className="stat__value">
+        {value}
+        {unit ? <span className="stat__unit">{unit}</span> : null}
+      </div>
+      {hint ? <div className="stat__hint">{hint}</div> : null}
+    </div>
+  )
+}
+
+export function Delta({ value }: { value: number }) {
+  const tone = value > 0 ? 'earn' : value < 0 ? 'spend' : 'neutral'
+  return <span className={`delta delta--${tone}`}>{fmtDelta(value)}</span>
+}
+
+export function SourceBadge({ source, error }: { source: DataSource; error?: string }) {
+  if (source === 'live') {
+    return (
+      <span className="source source--live" title="数据来自服务端 /api/public/*">
+        ● 实时数据
+      </span>
+    )
+  }
+  return (
+    <span className="source source--mock" title={error ? `后端未就绪，已用本地 mock 兜底：${error}` : '本地 mock 数据'}>
+      ◐ 演示数据（mock）
+    </span>
+  )
+}
+
+/** 静态页（join/help）也显示真实服务端在线状态，避免“没有数据源”的歧义。 */
+export function ServerBadge() {
+  const [online, setOnline] = useState(false)
+  useEffect(() => {
+    let alive = true
+    fetch('/api/public/ping', { headers: { accept: 'application/json' } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (alive) setOnline(!!d?.ok)
+      })
+      .catch(() => {
+        if (alive) setOnline(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+  return <SourceBadge source={online ? 'live' : 'mock'} error={online ? undefined : '服务端 ping 失败'} />
+}
+
+export function Loading({ label = '加载中…' }: { label?: string }) {
+  return (
+    <div className="state state--loading">
+      <span className="spinner" aria-hidden="true" />
+      {label}
+    </div>
+  )
+}
+
+export function Empty({ children }: { children: ReactNode }) {
+  return <div className="state state--empty">{children}</div>
+}
+
+export function ErrorBox({ children }: { children: ReactNode }) {
+  return <div className="form-error">{children}</div>
+}
+
+export function KindBadge({ kind }: { kind: 'resident' | 'npc' }) {
+  return kind === 'npc' ? (
+    <span className="kind kind--npc">NPC</span>
+  ) : (
+    <span className="kind kind--resident">镇民鱼</span>
+  )
+}

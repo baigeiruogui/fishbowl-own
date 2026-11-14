@@ -1,0 +1,67 @@
+==================================================================
+ 鱼缸小镇 · P1 服务端经济闭环 e2e（真跑，不 mock）
+==================================================================
+运行时间   : 2026-11-14T02:18:05.807Z  (Asia/Shanghai 2026/11/14 10:18:05)
+Node 版本  : v24.22.2
+验证命令   : node scripts/e2e/p1-server.mjs
+
+临时 DB    : /tmp/fishbowl-e2e-UYxFxY/e2e.db
+服务端     : http://127.0.0.1:44751  （Fastify · 临时库 · 随机端口 44751）
+healthz    : ok=true service=fishbowl-own
+
+[1] 造鱼：优先用 t7 主人 API（POST /api/owner/fish，ADMIN_TOKEN 保护）；不可用则回退 db 直连
+    建鱼途径   : HTTP 主人 API（POST /api/owner/fish）
+    fish_id    : f_793d6da0e31e8b66
+    昵称       : e2e小鱼
+    初始余额   : 100 鱼币
+    接入码     : fbr_7ab01…b5a7（脱敏）
+
+[2] 回合：GET /turns?kinds=agency → POST /turns/:id（agency 拿主意）
+    → GET  /turns  200，回合 turn_a6e7b55e1a4fb2a6（kind=agency，messages=2 条，actions=[none, pier, arcade, work, rest]）
+    → POST /turns/turn_a6e7b55e1a4fb2a6  {answer:{"action":"pier",...}}  200，receipt.ok=true，balance=100
+    余额不变：100 鱼币（拿主意/走路不发钱）
+
+[3] 赚钱·打工：GET /jobs（镇上种子招工）→ POST /jobs/take → engine.tick 到期结算
+    → GET  /jobs  200，共 6 个招工；接最高薪「夜市摆摊」pay=25 时长=90min 余 2 位
+    → POST /jobs/take {offer_id:job_51dd1f8827c51bd4}  200，contract=jc_3ec1c557dcb3dc3d state=working pay=25
+    → engine.tick(+91min) 结算 → settledJobs=1（contract jc_3ec1c557dcb3dc3d, pay=25）
+    余额 100 → 125（+25）
+    账本       : job        +25  (ref=jc_3ec1c557dcb3dc3d)
+
+[4] 赚钱·钓鱼卖钱：POST /goto(pier,do=fish) ×3 → GET /market → POST /sell
+    → POST /goto {place:pier,do:fish}  200，产出 小鱼×1（catch_id=catch_d02d2ed0f9d9b318）
+    → POST /goto {place:pier,do:fish}  200，产出 小鱼×1（catch_id=catch_a8619dfb36fea105）
+    → POST /goto {place:pier,do:fish}  200，产出 小鱼×1（catch_id=catch_864a3e31c7b412c8）
+    → GET  /market  200，鱼获：小鱼×3，市场价 5/条
+    → POST /sell {item:"小鱼", qty:3}  200，sale.amount=15（5×3）
+    余额 125 → 140（+15）
+    账本       : fish_sell  +15  (ref=小鱼)
+
+[5] 花钱·座位费：domain.paySeatFee(fee=12, ref=table_e2e)（自由消费走同一条 postLedger 通道）
+    → paySeatFee 返回 spent=12，余额 140 → 128（-12）
+    账本       : seat_fee   -12  (ref=table_e2e)
+
+[6] 账本全量 & 不变量校验（SUM(ledger.delta) == fish.balance）
+    （id 从 7 起，是因为种子先建了 6 条 NPC，其 init 账本占了前面几个 id；以下只列这条鱼的账本）
+    id delta   balance_after  reason      ref           
+    7  +100    100            init        start         
+    8  +25     125            job         jc_3ec1c557dcb3dc3d
+    9  +15     140            fish_sell   小鱼            
+    10 -12     128            seat_fee    table_e2e     
+--------------------------------------------
+    SUM(delta) = 128  ；fish.balance = 128  ；verifyBalance.ok = true
+    含 job(+25) / fish_sell(+15) 正向，seat_fee(-12) 负向 ✔
+
+[7] 汇总：赚了多少 / 花多少 / 净变化
+    初始余额      : 100
+    打工赚 (job)  : +25
+    钓鱼卖钱赚    : +15
+    座位费花      : -12
+------------------------------
+    总赚          : +40
+    总花          : -12
+    最终余额      : 128  （净 +28）
+
+==================================================================
+✅ 全部断言通过：赚(job/fish_sell)已入库、花(seat_fee)已入库、SUM(ledger.delta)==fish.balance
+==================================================================

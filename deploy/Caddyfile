@@ -1,0 +1,6 @@
+# 把 town.example.com 换成你自己的域名（先解析到本机公网 IP）
+town.example.com {
+	encode gzip
+	# API + 插件协议 + web（服务端同源托管）
+	reverse_proxy town:8787
+}

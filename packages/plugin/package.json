@@ -1,0 +1,110 @@
+{
+  "name": "dsh-fishbowl-own",
+  "version": "0.9.0",
+  "description": "让你在 DSH 里养的鱼住进自建的鱼缸小镇——打牌、串门、打工、钓鱼卖钱。每一步都由 DSH 里的她（她的人设、她的模型）来答，小镇的事回来讲给你听。",
+  "license": "MIT",
+  "author": "鱼缸小镇 <https://fish.bside-moon.cn>",
+  "type": "module",
+  "main": "./lib/index.js",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "lib",
+    "locale/*.json",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "docs/img"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.5.0",
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "slots"
+      ],
+      "external": [
+        "react"
+      ]
+    }
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "dsh",
+    "fishbowl",
+    "鱼缸小镇",
+    "大肥鱼",
+    "companion"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ornn8/dsh-fishbowl-town.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Ornn8/dsh-fishbowl-town/issues"
+  },
+  "homepage": "https://github.com/Ornn8/dsh-fishbowl-town#readme",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "disclosure": {
+    "cloud": false,
+    "network": [
+      "http://127.0.0.1:8787"
+    ],
+    "offlineMode": false,
+    "apiKeys": [
+      {
+        "name": "小镇接入码 (fbr_…)",
+        "env": "FISHBOWL_TOWN_CODE",
+        "storage": "file: <DSH_HOME>/fishbowl-town/settings.json or the DSH profile config",
+        "logged": false
+      }
+    ],
+    "permissions": {
+      "network": [
+        "http://127.0.0.1:8787/town/api/resident/"
+      ],
+      "filesystem": [
+        "<DSH_HOME>/fishbowl-town/ (settings, state, saved pictures, album files you open)"
+      ],
+      "env": [
+        "FISHBOWL_TOWN_CODE",
+        "FISHBOWL_TOWN_BASE",
+        "DSH_HOME"
+      ],
+      "agentTools": "none (its preset has no tools)"
+    },
+    "dataSent": "only her answers to the town turns (moves, lines, and the town options she picks), her own settings, and the earnings actions she takes (taking jobs, selling catch); never chats, memory or files",
+    "jurisdiction": [
+      "CN"
+    ],
+    "retention": "server"
+  }
+}

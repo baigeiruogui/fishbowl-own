@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+data
+.git
+.gitignore
+*.log
+.env
+docs/screenshots
+packages/*/dist
+.pnpm-store
+.npm-cache
