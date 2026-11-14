@@ -10,6 +10,7 @@ import { DomainError } from '../domain/errors.ts'
 import { isAdmin, jsonBody, requireInt, sendError } from './common.ts'
 import { countOwnerFish, ensureOwnerTables, registerOwner, resolveOwnerToken, revokeOwnerToken, rotateOwnerToken } from './owner-auth.ts'
 import { createRateLimiter, perIpKey } from './rate-limit.ts'
+import { avatarUrl } from './avatar.ts'
 
 export interface OwnerDeps {
   db: DB
@@ -35,7 +36,7 @@ function fishView(f: Fish) {
     persona: f.persona,
     intro: f.intro,
     lookNote: f.lookNote,
-    avatar: f.avatar,
+    avatar: avatarUrl(f.id),
     status: f.status,
     balance: f.balance,
     dayCap: f.dayCap,
@@ -86,6 +87,7 @@ export const ownerRoutes: FastifyPluginAsync<OwnerDeps> = async (app: FastifyIns
     status: f.status,
     balance: f.balance,
     dayCap: f.dayCap,
+    avatar: avatarUrl(f.id),
     hasCode,
     createdAt: f.createdAt,
   })

@@ -8,6 +8,7 @@ import { turnSeat } from '../../../games/src/index.ts'
 import { startOfLocalDay } from '../domain/account.ts'
 import { DomainError } from '../domain/errors.ts'
 import { sendError } from './common.ts'
+import { avatarUrl } from './avatar.ts'
 
 /** 牌桌的最小结构（GameTable / 测试桩都满足）。 */
 export interface TableLike {
@@ -111,14 +112,14 @@ function resolveTable(deps: PublicP2Deps, id: string): TableLike | null {
 }
 
 /** 座位视图：输出全部座位槽（空位仅含 seat，占用则带 fishId/name）。 */
-function seatViews(db: DB, t: TableLike): { seat: number; fishId?: string; name?: string }[] {
+function seatViews(db: DB, t: TableLike): { seat: number; fishId?: string; name?: string; avatar?: string }[] {
   const occupied = new Map(t.players.map((p) => [p.seat, p.fishId]))
-  const out: { seat: number; fishId?: string; name?: string }[] = []
+  const out: { seat: number; fishId?: string; name?: string; avatar?: string }[] = []
   for (let i = 0; i < t.seats; i++) {
     const fishId = occupied.get(i)
     if (fishId) {
       const f = db.prepare('SELECT name FROM fish WHERE id = ?').get(fishId) as { name: string } | undefined
-      out.push({ seat: i, fishId, name: f?.name })
+      out.push({ seat: i, fishId, name: f?.name, avatar: avatarUrl(fishId) })
     } else {
       out.push({ seat: i })
     }
@@ -259,6 +260,7 @@ export const publicP2Routes: FastifyPluginAsync<PublicP2Deps> = async (app: Fast
           fishId: r.id,
           name: r.name,
           kind: r.kind,
+          avatar: avatarUrl(r.id),
           balance: Number(r.balance),
           wins,
           losses,

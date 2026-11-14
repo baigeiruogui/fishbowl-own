@@ -7,6 +7,7 @@ import './owner.css'
 import './p3.css'
 import './p35.css'
 import './p36.css'
+import './theme.css'
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

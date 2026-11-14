@@ -7,6 +7,7 @@ import { getFish } from '../db/index.ts'
 import { DomainError } from '../domain/errors.ts'
 import { startOfLocalDay } from '../domain/account.ts'
 import { sendError } from './common.ts'
+import { avatarUrl } from './avatar.ts'
 
 export interface PublicDeps {
   db: DB
@@ -113,11 +114,12 @@ export const publicRoutes: FastifyPluginAsync<PublicDeps> = async (app: FastifyI
         ts: Number(r.ts),
         fishId: r.fish_id,
         fishName: r.name,
+        avatar: avatarUrl(r.fish_id),
         reason: r.reason,
         delta: Number(r.delta),
         ref: r.ref ?? null,
         // 旧字段（兼容旧的 recent.fish 读取方）
-        fish: { id: r.fish_id, name: r.name },
+        fish: { id: r.fish_id, name: r.name, avatar: avatarUrl(r.fish_id) },
       }))
 
       return {
@@ -167,7 +169,7 @@ export const publicRoutes: FastifyPluginAsync<PublicDeps> = async (app: FastifyI
         id: r.id,
         name: r.name,
         kind: r.kind,
-        avatar: r.avatar,
+        avatar: avatarUrl(r.id),
         intro: r.intro,
         balance: Number(r.balance),
         status: r.status,
@@ -223,7 +225,7 @@ export const publicRoutes: FastifyPluginAsync<PublicDeps> = async (app: FastifyI
           persona: fish.persona,
           intro: fish.intro,
           lookNote: fish.lookNote,
-          avatar: fish.avatar,
+          avatar: avatarUrl(fish.id),
           balance: fish.balance,
           status: fish.status,
           dayCap: fish.dayCap,

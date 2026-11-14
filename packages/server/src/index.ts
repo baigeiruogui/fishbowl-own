@@ -15,6 +15,7 @@ import { publicRoutes } from './api/public.ts'
 import { publicP2Routes } from './api/public-p2.ts'
 import { publicP3Routes } from './api/public-p3.ts'
 import { publicP35Routes } from './api/public-p35.ts'
+import { avatarRoutes } from './api/avatar.ts'
 import { registerStatic } from './static.ts'
 import { seedTown } from './seed.ts'
 import { createDriver } from './games/driver.ts'
@@ -128,6 +129,8 @@ export async function buildServer(opts: BuildOptions = {}) {
   await app.register(publicP3Routes, { prefix: '/api/public', db })
   // P3.5 公开只读：相册 / 画廊 / 夸夸 / 相册文件
   await app.register(publicP35Routes, { prefix: '/api/public', db })
+  // 程序化鱼头像 SVG
+  await app.register(avatarRoutes, { prefix: '/api/public', db })
 
   // 静态托管：packages/web/dist 存在则同源提供（SPA）
   const staticDir = opts.staticDir ?? join(here, '../../web/dist')

@@ -82,10 +82,68 @@ export function ServerBadge() {
 
 export function Loading({ label = '加载中…' }: { label?: string }) {
   return (
-    <div className="state state--loading">
-      <span className="spinner" aria-hidden="true" />
-      {label}
+    <div className="state state--loading" aria-busy="true">
+      <div className="skeleton-wrap">
+        <div className="skeleton skeleton--hero" />
+        <div className="skeleton-row">
+          <div className="skeleton skeleton--card" />
+          <div className="skeleton skeleton--card" />
+          <div className="skeleton skeleton--card" />
+        </div>
+        <div className="skeleton skeleton--line" style={{ width: '72%' }} />
+        <div className="skeleton skeleton--line" style={{ width: '52%' }} />
+      </div>
+      <div className="skeleton-label">{label}</div>
     </div>
+  )
+}
+
+export function Skeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="skeleton-wrap" aria-hidden="true">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="skeleton skeleton--line" style={{ width: `${90 - i * 12}%` }} />
+      ))}
+    </div>
+  )
+}
+
+export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <section className={`panel ${className}`.trim()}>{children}</section>
+}
+
+export function Badge({ tone = 'info', children }: { tone?: 'info' | 'earn' | 'spend' | 'gold'; children: ReactNode }) {
+  const map = { info: 'source source--live', earn: 'source source--live', spend: 'source source--mock', gold: 'source source--mock' }
+  return <span className={map[tone]}>{children}</span>
+}
+
+export function PageHeader({
+  eyebrow,
+  title,
+  sub,
+  actions,
+  source,
+  error,
+}: {
+  eyebrow?: string
+  title: ReactNode
+  sub?: ReactNode
+  actions?: ReactNode
+  source?: DataSource
+  error?: string
+}) {
+  return (
+    <section className="hero hero--slim">
+      <div className="hero__head">
+        <div>
+          {eyebrow ? <p className="hero__eyebrow">{eyebrow}</p> : null}
+          <h1 className="hero__title">{title}</h1>
+          {sub ? <p className="hero__sub">{sub}</p> : null}
+          {actions ? <div className="join-cta">{actions}</div> : null}
+        </div>
+        {source ? <SourceBadge source={source} error={error} /> : null}
+      </div>
+    </section>
   )
 }
 

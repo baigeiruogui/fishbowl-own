@@ -14,6 +14,7 @@ import {
   phoneHref,
   relationsHref,
   townHref,
+  useRoute,
 } from '../router.ts'
 
 const NAV = [
@@ -34,17 +35,30 @@ const NAV = [
 
 export function Layout({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false)
+  useRoute()
+  const hash = typeof window !== 'undefined' ? window.location.hash || townHref : townHref
   return (
     <div className="app">
       <header className="topbar">
         <div className="topbar__inner">
           <a className="brand" href={townHref} onClick={() => setOpen(false)}>
             <span className="brand__mark" aria-hidden="true">
-              🐠
+              <svg viewBox="0 0 32 32" fill="none">
+                <defs>
+                  <linearGradient id="fishLogo" x1="4" y1="8" x2="28" y2="26" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#7fe4f7" />
+                    <stop offset="1" stopColor="#5ee2b0" />
+                  </linearGradient>
+                </defs>
+                <path d="M6 16c4-6 12-8 18-3-2 5-6 8-11 8-3 0-5-2-7-5Z" fill="url(#fishLogo)" opacity="0.95" />
+                <path d="M24 13c2-2 4-3 6-2-1 3-2 5-4 6 0-2-1-3-2-4Z" fill="#37c6e8" opacity="0.8" />
+                <circle cx="11" cy="15" r="1.6" fill="#04201f" />
+                <path d="M8 10c1.5-2 4-3 6-2" stroke="#a9f0ff" strokeWidth="1.4" strokeLinecap="round" opacity="0.8" />
+              </svg>
             </span>
             <span className="brand__text">
               鱼缸小镇
-              <small>自建版 · P3.5 小镇生活</small>
+              <small>自建版 · 深海小镇</small>
             </span>
           </a>
           <button
@@ -58,7 +72,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </button>
           <nav className={`topnav ${open ? 'topnav--open' : ''}`}>
             {NAV.map((n) => (
-              <a key={n.href} href={n.href} onClick={() => setOpen(false)}>
+              <a key={n.href} href={n.href} className={hash === n.href ? 'is-active' : undefined} onClick={() => setOpen(false)}>
                 {n.label}
               </a>
             ))}
