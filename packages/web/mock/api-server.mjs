@@ -24,6 +24,11 @@ import {
 const port = Number(process.argv[2] ?? process.env.PORT ?? 8787)
 const host = process.env.HOST ?? '127.0.0.1'
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? 'stub-admin'
+/** 入驻费（元）；0 = 免费入驻（新鱼直接 active）。 */
+const JOIN_PRICE_YUAN = Number(process.env.JOIN_PRICE_YUAN ?? 10)
+const PAYMENT_NOTE =
+  process.env.PAYMENT_NOTE ?? `入驻费 ¥${JOIN_PRICE_YUAN}，付款后由镇长核销开通（stub 演示）`
+const PAYMENT_QR_URL = process.env.PAYMENT_QR_URL ?? ''
 
 // ---- 进程内可变状态（建鱼 / 状态覆盖 / 接入码 / 多主人账号） ----
 const createdFish = new Map() // id -> fish summary 形状
@@ -101,20 +106,25 @@ function ownerSelfPayload(token) {
   const fish = ids
     .map((id) => createdFish.get(id))
     .filter(Boolean)
-    .map((f) => ({
-      id: f.id,
-      name: f.name,
-      kind: f.kind,
-      status: statusOverride.get(f.id) ?? f.status,
-      balance: f.balance,
-      dayCap: f.dayCap ?? null,
-      hasCode: codes.has(f.id),
-      createdAt: f.createdAt,
-    }))
+    .map((f) => {
+      const status = statusOverride.get(f.id) ?? f.status
+      return {
+        id: f.id,
+        name: f.name,
+        kind: f.kind,
+        status,
+        balance: f.balance,
+        dayCap: f.dayCap ?? null,
+        hasCode: codes.has(f.id),
+        payment: status === 'pending_payment' ? { priceYuan: JOIN_PRICE_YUAN, paid: false } : null,
+        createdAt: f.createdAt,
+      }
+    })
   return { ok: true, owner: owner ?? null, fish }
 }
 
 function ownerView(f) {
+  const status = statusOverride.get(f.id) ?? f.status ?? 'active'
   return {
     id: f.id,
     name: f.name,
@@ -123,9 +133,10 @@ function ownerView(f) {
     intro: f.intro ?? '',
     lookNote: f.lookNote ?? '',
     avatar: f.avatar ?? '🐠',
-    status: statusOverride.get(f.id) ?? f.status ?? 'active',
+    status,
     balance: f.balance ?? 0,
     dayCap: f.dayCap ?? null,
+    payment: status === 'pending_payment' ? { priceYuan: JOIN_PRICE_YUAN, paid: false } : null,
     createdAt: f.createdAt ?? Date.now(),
   }
 }
@@ -189,7 +200,8 @@ const server = createServer(async (req, res) => {
           lookNote: '',
           balance: Number.isInteger(body.balance) ? body.balance : 100,
           dayCap: null,
-          status: 'active',
+          // 有入驻费时新鱼为「待付款」，等管理员核销。
+          status: JOIN_PRICE_YUAN > 0 ? 'pending_payment' : 'active',
           online: true,
           createdAt: Date.now(),
         }
@@ -198,7 +210,7 @@ const server = createServer(async (req, res) => {
         codes.set(id, code)
         ids.push(id)
         ownerFishIds.set(ownerToken, ids)
-        json(res, 200, { ok: true, fish: ownerView(fish), code, status: 'active' })
+        json(res, 200, { ok: true, fish: ownerView(fish), code, status: fish.status })
         return
       }
       const orotate = /^\/api\/owner\/fish\/([^/]+)\/code\/rotate$/.exec(path)
@@ -305,8 +317,45 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  // ---------- 管理员 API（/api/admin，ADMIN_TOKEN） ----------
+  if (path.startsWith('/api/admin/')) {
+    if (!isAdmin(req)) {
+      json(res, 401, { ok: false, error: 'UNAUTHORIZED', code: 'UNAUTHORIZED', reason: 'missing or invalid admin token' })
+      return
+    }
+    if (req.method === 'GET' && path === '/api/admin/fish') {
+      const fish = allFish().map((f) => ({
+        ...ownerView(f),
+        ownerId: [...ownerFishIds.entries()].find(([, ids]) => ids.includes(f.id))?.[0] ?? null,
+      }))
+      json(res, 200, { ok: true, count: fish.length, fish, items: fish })
+      return
+    }
+    const payConfirm = /^\/api\/admin\/fish\/([^/]+)\/(pay_confirm|approve)$/.exec(path)
+    if (req.method === 'POST' && payConfirm) {
+      const id = decodeURIComponent(payConfirm[1])
+      const fish = allFish().find((f) => f.id === id)
+      if (!fish) {
+        json(res, 404, { ok: false, code: 'NOT_FOUND', reason: `fish not found: ${id}` })
+        return
+      }
+      statusOverride.set(id, 'active')
+      json(res, 200, { ok: true, fish: ownerView({ ...fish, status: 'active' }) })
+      return
+    }
+    json(res, 404, { ok: false, code: 'NOT_FOUND', path })
+    return
+  }
+
   if (req.method !== 'GET') {
     json(res, 405, { ok: false, code: 'METHOD_NOT_ALLOWED' })
+    return
+  }
+
+  if (path === '/api/public/join-info') {
+    const payload = { ok: true, priceYuan: JOIN_PRICE_YUAN, paymentNote: PAYMENT_NOTE }
+    if (PAYMENT_QR_URL) payload.qrUrl = PAYMENT_QR_URL
+    json(res, 200, payload)
     return
   }
 

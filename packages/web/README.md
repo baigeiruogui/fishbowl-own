@@ -52,6 +52,19 @@ React + Vite + TS 的「鱼缸小镇」公开面板。
 
 > 页面仅在网络失败 / 超时 / 5xx（或使用 `own_mock_…` 本地令牌）时回落本地演示；401 会提示重新登录，不静默 mock。
 
+## 入驻计费与管理员核销（t66 / t67）
+
+| 路径 | 返回 |
+|---|---|
+| `GET /api/public/join-info` | `{ ok, priceYuan, paymentNote, qrUrl? }`（入驻价 / 付款说明 / 收款码，公开） |
+| `GET /api/admin/fish` | `{ ok, count, fish: [...] }`（ADMIN_TOKEN；含 `pending_payment` 状态与 `ownerId`） |
+| `POST /api/admin/fish/:id/pay_confirm` · 同义 `/approve` | `{ ok, fish }`（把「待付款」核销为 `active`，并记 payment 事件） |
+
+- 入驻价 > 0 时，主人建鱼得到 `status: 'pending_payment'` + `payment: { priceYuan, paid:false }`；余额照发。
+- 前端 `#/join` 展示价格 / 付款说明 / 收款码（`/art/qr.png` 或 join-info 的 `qrUrl`，缺失时显示「联系镇长」占位卡）。
+- `#/owner` 对 `pending_payment` 显示「待付款」徽标与付款提示，换码 / 暂停仍可用；管理员区展开后可按 ADMIN_TOKEN 拉取全部鱼并点「已付款，通过」核销。
+- `JOIN_PRICE_YUAN=0` 时免费入驻，新鱼直接 `active`（页面显示「免费」）。
+
 ## 主人 API 契约（`/api/owner/*`，ADMIN_TOKEN 保护；已实现于 packages/server）
 
 鉴权：`x-admin-token: <ADMIN_TOKEN>` 或 `Authorization: Bearer <ADMIN_TOKEN>`。
@@ -138,5 +151,5 @@ pnpm -C packages/web mock        # http://127.0.0.1:8787，复用 src/mock.ts �
 pnpm -C packages/web preview     # http://127.0.0.1:4173，/api 代理到 stub
 ```
 
-`mock/api-server.mjs` 实现了上表全部端点（P1 三个 + P2 四个 + P3 三个 + P3.5 四个），并**模拟主人 API**（`POST /api/owner/fish`、`/fish/:id/code/rotate`、`/fish/:id/pause|resume`，进程内内存、重启清空；默认令牌 `stub-admin`，可用 `ADMIN_TOKEN` 环境变量覆盖）。数据与前端兜底完全同源（Node 24 直接跑 `src/mock.ts`）。
+`mock/api-server.mjs` 实现了上表全部端点（P1 三个 + P2 四个 + P3 三个 + P3.5 四个），并**模拟主人 API**（`POST /api/owner/fish`、`/fish/:id/code/rotate`、`/fish/:id/pause|resume`，进程内内存、重启清空；默认令牌 `stub-admin`，可用 `ADMIN_TOKEN` 环境变量覆盖）。**t67 起还模拟入驻计费**：`GET /api/public/join-info`（默认 ¥10，`JOIN_PRICE_YUAN=0` 免费）、owner 建鱼 → `pending_payment`、`GET /api/admin/fish` + `POST /api/admin/fish/:id/pay_confirm|approve` 核销。数据与前端兜底完全同源（Node 24 直接跑 `src/mock.ts`）。
 真实 server 就绪后停掉 stub、直接跑 `pnpm -C packages/server dev` 即可，面板无需改动（后端需设置 `ADMIN_TOKEN`）。

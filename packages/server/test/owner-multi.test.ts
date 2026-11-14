@@ -6,8 +6,8 @@ import type { DB } from '../src/db/index.ts'
 
 const ADMIN = 't48-admin'
 
-async function setup(opts: { openRegistration?: boolean } = {}) {
-  const app = await buildServer({ dbPath: ':memory:', adminToken: ADMIN, openRegistration: opts.openRegistration ?? true })
+async function setup(opts: { openRegistration?: boolean; joinPriceYuan?: number } = {}) {
+  const app = await buildServer({ dbPath: ':memory:', adminToken: ADMIN, openRegistration: opts.openRegistration ?? true, joinPriceYuan: opts.joinPriceYuan ?? 0 })
   const db = (app as unknown as { db: DB }).db
   return { app, db }
 }

@@ -12,6 +12,9 @@ import { avatarUrl } from './avatar.ts'
 export interface PublicDeps {
   db: DB
   townName?: string
+  joinPriceYuan?: number
+  paymentNote?: string
+  paymentQrUrl?: string
 }
 
 /** 「在线」判定窗口：最近 2 分钟内有轮询/操作（以最近一条 ledger 或 event 时间为准）。 */
@@ -70,6 +73,17 @@ export const publicRoutes: FastifyPluginAsync<PublicDeps> = async (app: FastifyI
     const r = db.prepare(`SELECT COUNT(*) AS c FROM fish${where ? ' WHERE ' + where : ''}`).get(...(args as never[])) as { c: number }
     return Number(r.c)
   }
+
+  // 入驻费信息（web 注册页用）
+  app.get(
+    '/join-info',
+    pub(() => {
+      const priceYuan = opts.joinPriceYuan ?? 0
+      const payload: Record<string, unknown> = { ok: true, priceYuan, paymentNote: opts.paymentNote ?? (priceYuan > 0 ? `入驻费 ¥${priceYuan}，付款后由管理员核销开通` : '') }
+      if (opts.paymentQrUrl) payload.qrUrl = opts.paymentQrUrl
+      return payload
+    }),
+  )
 
   // 小镇概况：新增 town{...} 契约对象；同时保留旧字段（name/fishCount/recent.fish...）。
   app.get(

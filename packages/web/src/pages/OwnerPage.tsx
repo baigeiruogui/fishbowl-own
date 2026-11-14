@@ -5,27 +5,34 @@ import {
   createFish,
   createOwnerFish,
   listOwnerFish,
-  loadFishList,
   readOwnerProfile,
   registerOwner,
   rotateFishCode,
   rotateOwnerCode,
   setFishPaused,
   setOwnerFishPaused,
+  adminConfirmPayment,
+  adminListFish,
+  loadJoinInfo,
 } from '../api.ts'
-import { useResource } from '../hooks.ts'
+import type { AdminFishRow } from '../api.ts'
 import { Avatar, Empty, KindBadge, Loading, SourceBadge } from '../components/ui.tsx'
 import { fmtCoins, formatDate } from '../format.ts'
 import { fishHref, joinHref } from '../router.ts'
 import type {
   CreateFishResult,
-  FishSummary,
   OwnerAccount,
   OwnerFishListItem,
   RotateCodeResult,
 } from '../types.ts'
 
-const STATUS_LABEL: Record<string, string> = { active: '在镇', paused: '暂停', pending: '待审核', banned: '封禁' }
+const STATUS_LABEL: Record<string, string> = {
+  active: '在镇',
+  paused: '暂停',
+  pending: '待审核',
+  pending_payment: '待付款',
+  banned: '封禁',
+}
 const OWNER_TOKEN_KEY = 'fishbowl.ownerToken'
 const ADMIN_TOKEN_KEY = 'fishbowl.adminToken'
 
@@ -93,6 +100,24 @@ function OwnerSessionPanel() {
   const [intro, setIntro] = useState('')
   const [balance, setBalance] = useState('100')
   const [rowBusy, setRowBusy] = useState<string | null>(null)
+  const [joinPrice, setJoinPrice] = useState(10)
+  const [joinNote, setJoinNote] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    loadJoinInfo()
+      .then((i) => {
+        if (!alive) return
+        setJoinPrice(i.priceYuan)
+        setJoinNote(i.paymentNote ?? '')
+      })
+      .catch(() => {
+        /* 保持默认 ¥10 */
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   useEffect(() => {
     if (!token) {
@@ -178,7 +203,17 @@ function OwnerSessionPanel() {
     setBusy(true)
     try {
       const res = await createOwnerFish(token, { name: trimmed, persona: persona.trim(), intro: intro.trim(), balance: bal })
-      setCode({ title: `🎉 已创建「${res.fish.name}」`, code: res.code, meta: `鱼币 ${fmtCoins(res.fish.balance)} · ${formatDate(Date.now())}` })
+      const pending = res.fish.status === 'pending_payment'
+      setCode({
+        title: `🎉 已创建「${res.fish.name}」`,
+        code: res.code,
+        meta: pending
+          ? `待付款 ¥${res.fish.payment?.priceYuan ?? joinPrice} · 鱼币 ${fmtCoins(res.fish.balance)}`
+          : `鱼币 ${fmtCoins(res.fish.balance)} · ${formatDate(Date.now())}`,
+      })
+      if (pending) {
+        setNotice(`新鱼「${res.fish.name}」已建好，需支付入驻费 ¥${res.fish.payment?.priceYuan ?? joinPrice}，付款后由镇长核销开通。`)
+      }
       setName('')
       setPersona('')
       setIntro('')
@@ -364,6 +399,12 @@ function OwnerSessionPanel() {
                         <div className="owner-fish__meta">
                           {fmtCoins(f.balance)} 鱼币 · <span className="mono">{f.id}</span>
                         </div>
+                        {f.status === 'pending_payment' ? (
+                          <div className="pay-hint">
+                            💳 待付款 ¥{f.payment?.priceYuan ?? joinPrice}：付款后把「主人昵称 + 鱼名」发给镇长核销，核销后自动转为「在镇」。
+                            {joinNote ? <span className="pay-hint__note">（{joinNote}）</span> : null}
+                          </div>
+                        ) : null}
                       </div>
                       <div className="owner-fish__actions">
                         <button type="button" className="btn btn--ghost btn--sm" disabled={rowBusy === f.id} onClick={() => onRotate(f)}>
@@ -403,7 +444,37 @@ function AdminPanel() {
   const [code, setCode] = useState<{ title: string; code: string; meta?: string } | null>(null)
   const [refresh, setRefresh] = useState(0)
   const [rowBusy, setRowBusy] = useState<string | null>(null)
-  const { loading, result } = useResource<FishSummary[]>(loadFishList, [refresh])
+  const [adminFish, setAdminFish] = useState<AdminFishRow[]>([])
+  const [adminLoading, setAdminLoading] = useState(false)
+  const [adminMock, setAdminMock] = useState(false)
+  const [adminError, setAdminError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!token.trim()) {
+      setAdminFish([])
+      setAdminError(null)
+      return
+    }
+    let alive = true
+    setAdminLoading(true)
+    adminListFish(token.trim())
+      .then((r) => {
+        if (!alive) return
+        setAdminFish(r.fish)
+        setAdminMock(r.mock)
+        setAdminError(null)
+        setAdminLoading(false)
+      })
+      .catch((e) => {
+        if (!alive) return
+        setAdminError(describeError(e))
+        setAdminLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [token, refresh])
 
   function onToken(v: string) {
     setToken(v)
@@ -437,7 +508,7 @@ function AdminPanel() {
     }
   }
 
-  async function onRotate(f: FishSummary) {
+  async function onRotate(f: AdminFishRow) {
     setRowBusy(f.id)
     try {
       const res: RotateCodeResult = await rotateFishCode(token.trim(), f.id)
@@ -449,13 +520,26 @@ function AdminPanel() {
     }
   }
 
-  async function onPause(f: FishSummary) {
+  async function onPause(f: AdminFishRow) {
     setRowBusy(f.id)
     try {
       await setFishPaused(token.trim(), f.id, f.status !== 'paused')
       setRefresh((n) => n + 1)
     } catch (err) {
       setError(`${f.name} 操作失败：${describeError(err)}`)
+    } finally {
+      setRowBusy(null)
+    }
+  }
+
+  async function onConfirmPaid(f: AdminFishRow) {
+    setRowBusy(f.id)
+    try {
+      await adminConfirmPayment(token.trim(), f.id)
+      setNotice(`✅ 已核销「${f.name}」的付款，转为在镇。`)
+      setRefresh((n) => n + 1)
+    } catch (err) {
+      setError(`${f.name} 核销失败：${describeError(err)}`)
     } finally {
       setRowBusy(null)
     }
@@ -500,20 +584,21 @@ function AdminPanel() {
 
         <section className="panel">
           <header className="panel__head">
-            <h2>镇上的鱼</h2>
-            <span className="panel__hint">公开发布列表</span>
+            <h2>全部鱼（管理员）</h2>
+            <span className="panel__hint">GET /api/admin/fish · POST pay_confirm</span>
           </header>
-          {loading ? (
+          {adminLoading ? (
             <Loading label="正在加载…" />
-          ) : !result ? (
-            <Empty>加载失败。</Empty>
+          ) : adminError ? (
+            <Empty>{adminError}</Empty>
           ) : (
             <>
-              {result.source === 'mock' ? <div className="list-note">后端不可用，以下为演示数据。</div> : null}
+              {adminMock ? <div className="list-note">后端不可用，以下为本地演示鱼（核销动作也只改本地数据）。</div> : null}
+              {notice ? <div className="inline-note">{notice}</div> : null}
               <ul className="owner-fish-list">
-                {result.data.map((f) => (
+                {adminFish.map((f) => (
                   <li key={f.id} className="owner-fish">
-                    <Avatar avatar={f.avatar} name={f.name} size={40} />
+                    <Avatar avatar={f.avatar ?? '🐟'} name={f.name} size={40} />
                     <div className="owner-fish__body">
                       <div className="owner-fish__name">
                         <a href={fishHref(f.id)}>{f.name}</a>
@@ -523,8 +608,18 @@ function AdminPanel() {
                       <div className="owner-fish__meta">
                         {fmtCoins(f.balance)} 鱼币 · <span className="mono">{f.id}</span>
                       </div>
+                      {f.status === 'pending_payment' ? (
+                        <div className="pay-hint">
+                          💳 待付款 ¥{f.payment?.priceYuan ?? 10}：确认已收到该主人付款后可核销。
+                        </div>
+                      ) : null}
                     </div>
                     <div className="owner-fish__actions">
+                      {f.status === 'pending_payment' ? (
+                        <button type="button" className="btn btn--sm" disabled={rowBusy === f.id || !token} onClick={() => onConfirmPaid(f)}>
+                          已付款，通过
+                        </button>
+                      ) : null}
                       <button type="button" className="btn btn--ghost btn--sm" disabled={rowBusy === f.id || !token} onClick={() => onRotate(f)}>
                         换码
                       </button>

@@ -11,6 +11,7 @@ import type {
   FishDetail,
   FishSummary,
   GalleryPayload,
+  JoinInfo,
   LobbyPayload,
   OwnerAccount,
   OwnerFishListItem,
@@ -676,6 +677,136 @@ export function readOwnerProfile(token: string): OwnerAccount | null {
   }
 }
 
+// ======================= 入驻计费（/api/public/join-info） =======================
+
+/** 本地演示兜底：¥10 入驻费。 */
+export function mockJoinInfo(): JoinInfo {
+  return { priceYuan: 10, paymentNote: '入驻费 ¥10，付款后由镇长核销开通（本地演示）', mock: true }
+}
+
+/** 读取入驻计费配置；后端未就绪时返回 ¥10 演示配置。 */
+export async function loadJoinInfo(): Promise<JoinInfo> {
+  try {
+    const data = await getJson<{ ok: boolean; priceYuan?: number; paymentNote?: string; qrUrl?: string }>(
+      '/api/public/join-info',
+    )
+    const price = Number(data?.priceYuan ?? 0)
+    return {
+      priceYuan: Number.isFinite(price) ? Math.max(0, price) : 10,
+      paymentNote: String(data?.paymentNote ?? ''),
+      qrUrl: typeof data?.qrUrl === 'string' && data.qrUrl ? data.qrUrl : undefined,
+      mock: false,
+    }
+  } catch {
+    return mockJoinInfo()
+  }
+}
+
+// ======================= 管理员（/api/admin，ADMIN_TOKEN） =======================
+
+/** admin 视角的鱼（含 ownerId / payment）。 */
+export interface AdminFishRow extends OwnerFishListItem {
+  ownerId?: string | null
+  avatar?: string
+}
+
+async function getJsonAdmin<T>(path: string, adminToken: string): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8000)
+  let res: Response
+  try {
+    res = await fetch(path, {
+      headers: { accept: 'application/json', 'x-admin-token': adminToken },
+      signal: controller.signal,
+    })
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') throw new ApiError('请求超时', 0, 'TIMEOUT')
+    throw new ApiError('网络不可用', 0, 'NETWORK')
+  } finally {
+    clearTimeout(timer)
+  }
+  const data = (await res.json().catch(() => ({}))) as T & { ok?: boolean; code?: string; reason?: string }
+  if (!res.ok || data.ok === false) {
+    const reason = res.status === 401 ? 'ADMIN_TOKEN 无效或缺失' : String(data.reason ?? `请求失败（HTTP ${res.status}）`)
+    throw new ApiError(reason, res.status, String(data.code ?? `HTTP_${res.status}`))
+  }
+  return data as T
+}
+
+/** 聚合本地演示主人名下的所有鱼（用于 admin 在无后端时也能核销）。 */
+function readAllMockFish(): AdminFishRow[] {
+  const out: AdminFishRow[] = []
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (!key || !key.startsWith(OWNER_FISH_PREFIX)) continue
+      const token = key.slice(OWNER_FISH_PREFIX.length)
+      for (const f of readMockFish(token)) {
+        const owner = readOwnerProfile(token)
+        out.push({ ...f, ownerId: owner?.id ?? token.slice(0, 10) })
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return out
+}
+
+/** 本地演示：把指定鱼改成 active（模拟核销）。 */
+export function setMockFishStatus(fishId: string, status: string): boolean {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (!key || !key.startsWith(OWNER_FISH_PREFIX)) continue
+      const token = key.slice(OWNER_FISH_PREFIX.length)
+      const list = readMockFish(token)
+      const hit = list.find((f) => f.id === fishId)
+      if (!hit) continue
+      hit.status = status
+      if (status === 'active') hit.payment = { priceYuan: hit.payment?.priceYuan ?? 10, paid: true }
+      writeMockFish(token, list)
+      return true
+    }
+  } catch {
+    /* ignore */
+  }
+  return false
+}
+
+/** 管理员列出全部鱼（GET /api/admin/fish）；后端未就绪时回落本地演示鱼。 */
+export async function adminListFish(
+  adminToken: string,
+  opts: { allowMockFallback?: boolean } = {},
+): Promise<{ fish: AdminFishRow[]; mock: boolean }> {
+  try {
+    const data = await getJsonAdmin<{ ok: boolean; fish?: AdminFishRow[]; items?: AdminFishRow[] }>(
+      '/api/admin/fish',
+      adminToken,
+    )
+    const list = Array.isArray(data.fish) ? data.fish : Array.isArray(data.items) ? data.items : []
+    return { fish: list, mock: false }
+  } catch (e) {
+    if (opts.allowMockFallback === false) throw e
+    if (e instanceof ApiError && (e.status === 0 || e.status === 404 || e.status >= 500)) {
+      return { fish: readAllMockFish(), mock: true }
+    }
+    throw e
+  }
+}
+
+/** 管理员核销「已付款」→ active（POST /api/admin/fish/:id/pay_confirm，404 时回落本地演示）。 */
+export async function adminConfirmPayment(adminToken: string, fishId: string): Promise<{ mock: boolean }> {
+  try {
+    await postJson(`/api/admin/fish/${encodeURIComponent(fishId)}/pay_confirm`, {}, { token: adminToken })
+    return { mock: false }
+  } catch (e) {
+    if (e instanceof ApiError && (e.status === 0 || e.status === 404 || e.status >= 500)) {
+      if (setMockFishStatus(fishId, 'active')) return { mock: true }
+    }
+    throw e
+  }
+}
+
 async function getJsonAuth<T>(path: string, ownerToken: string): Promise<T> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 8000)
@@ -769,14 +900,17 @@ export async function createOwnerFish(ownerToken: string, input: CreateFishInput
   if (isMockToken(ownerToken)) {
     const list = readMockFish(ownerToken)
     if (list.length >= 3) throw new ApiError('每个主人最多养 3 条鱼', 409, 'LIMIT')
+    // 本地演示：模拟 ¥10 入驻费 → 新鱼为「待付款」，由管理员核销后转 active。
+    const priceYuan = mockJoinInfo().priceYuan
     const fish: OwnerFishListItem = {
       id: randToken('f_own_'),
       name: input.name.trim(),
       kind: input.kind ?? 'resident',
-      status: 'active',
+      status: priceYuan > 0 ? 'pending_payment' : 'active',
       balance: input.balance ?? 100,
       persona: input.persona,
       intro: input.intro,
+      payment: priceYuan > 0 ? { priceYuan, paid: false } : null,
       createdAt: Date.now(),
     }
     list.push(fish)
@@ -790,9 +924,10 @@ export async function createOwnerFish(ownerToken: string, input: CreateFishInput
         intro: fish.intro ?? '',
         lookNote: '',
         avatar: '🐠',
-        status: fish.status === 'paused' || fish.status === 'banned' ? fish.status : 'active',
+        status: fish.status,
         balance: fish.balance,
         dayCap: null,
+        payment: fish.payment ?? null,
         createdAt: fish.createdAt,
       },
       code: randToken('fbr_mock_'),

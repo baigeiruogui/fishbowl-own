@@ -214,9 +214,12 @@ export interface OwnerFishView {
   intro: string
   lookNote: string
   avatar: string
-  status: FishStatus
+  /** 可能是 pending_payment（待付款）/ pending（待审核），故用 string。 */
+  status: string
   balance: number
   dayCap: number | null
+  /** 待付款时服务端附带。 */
+  payment?: OwnerPayment | null
   createdAt: number
 }
 
@@ -269,7 +272,7 @@ export interface OwnerFishListItem {
   id: string
   name: string
   kind: FishKind
-  /** 服务端有 pending（待审核）状态，故用 string 兼容。 */
+  /** 服务端有 pending / pending_payment 等状态，故用 string 兼容。 */
   status: string
   balance: number
   persona?: string
@@ -277,7 +280,24 @@ export interface OwnerFishListItem {
   /** 服务端 /api/owner/me 返回：是否存在未吊销的接入码。 */
   hasCode?: boolean
   dayCap?: number | null
+  /** pending_payment 时服务端附带：入驻费与是否已付款。 */
+  payment?: OwnerPayment | null
   createdAt: number
+}
+
+/** 入驻费（元）与付款状态。 */
+export interface OwnerPayment {
+  priceYuan: number
+  paid: boolean
+}
+
+/** GET /api/public/join-info：入驻计费配置。 */
+export interface JoinInfo {
+  priceYuan: number
+  paymentNote: string
+  qrUrl?: string
+  /** true = 后端未就绪，前端用默认价兜底。 */
+  mock: boolean
 }
 
 export interface OwnerListResult {

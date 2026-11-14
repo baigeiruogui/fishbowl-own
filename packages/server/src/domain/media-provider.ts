@@ -8,6 +8,8 @@
 // - **key 不进日志**：key 只放进请求头，任何错误/异常都不打印 URL query、header 或 key。
 //
 // provider 只负责「产字节」，不碰数据库、不扣费、不写盘——这些都在 media.ts 里完成。
+import { readFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 
 export interface MediaBytes {
   /** 媒体二进制（SVG 文本也编码成 UTF-8 字节） */
@@ -514,6 +516,206 @@ function appendQuery(url: string, params: Record<string, string>): string {
   return url + (url.includes('?') ? '&' : '?') + qs
 }
 
+// ---------------------------------------------------------------------------
+// ComfyUI（/prompt → /history/{id} → /view 文生图）
+// ---------------------------------------------------------------------------
+
+/** ComfyUI API 格式的内置默认 txt2img 工作流（checkpoint→CLIP 正负→latent→KSampler→VAEDecode→SaveImage）。 */
+export function defaultComfyWorkflow(opts: {
+  ckpt: string
+  positive: string
+  negative: string
+  width: number
+  height: number
+  steps: number
+  cfg: number
+  sampler: string
+  seed: number
+}): Record<string, unknown> {
+  return {
+    '3': {
+      class_type: 'KSampler',
+      inputs: {
+        seed: opts.seed,
+        steps: opts.steps,
+        cfg: opts.cfg,
+        sampler_name: opts.sampler || 'euler',
+        scheduler: 'normal',
+        denoise: 1,
+        model: ['4', 0],
+        positive: ['6', 0],
+        negative: ['7', 0],
+        latent_image: ['5', 0],
+      },
+    },
+    '4': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: opts.ckpt } },
+    '5': { class_type: 'EmptyLatentImage', inputs: { width: opts.width, height: opts.height, batch_size: 1 } },
+    '6': { class_type: 'CLIPTextEncode', inputs: { text: opts.positive, clip: ['4', 1] } },
+    '7': { class_type: 'CLIPTextEncode', inputs: { text: opts.negative, clip: ['4', 1] } },
+    '8': { class_type: 'VAEDecode', inputs: { samples: ['3', 0], vae: ['4', 2] } },
+    '9': { class_type: 'SaveImage', inputs: { filename_prefix: 'fishbowl', images: ['8', 0] } },
+  }
+}
+
+/**
+ * 把正向提示词注入到工作流里「正向 CLIPTextEncode」的 text。
+ * 定位顺序：显式 IMAGE_GEN_PROMPT_NODE → 约定节点 '6'（内置模板/多数默认工作流）
+ *          → 采样器（KSampler*）的 inputs.positive 指向的节点（最稳） → 第一个 CLIPTextEncode。
+ */
+export function injectComfyPrompt(workflow: Record<string, unknown>, prompt: string, nodeId?: string): Record<string, unknown> {
+  const nodes = workflow as Record<string, any>
+  let target: string | undefined = nodeId && nodes[nodeId] ? nodeId : undefined
+  if (!target && nodes['6'] && nodes['6'].class_type === 'CLIPTextEncode') target = '6'
+  if (!target) {
+    // 从采样器的 positive 连接找正向节点
+    for (const n of Object.values(nodes)) {
+      if (!n || typeof n !== 'object') continue
+      const ct = (n as any).class_type
+      const isSampler = (typeof ct === 'string' && ct.includes('KSampler')) || ct === 'SamplerCustom'
+      if (!isSampler) continue
+      const link = (n as any).inputs?.positive
+      if (Array.isArray(link) && typeof link[0] === 'string' && nodes[link[0]]) {
+        target = link[0]
+        break
+      }
+    }
+  }
+  if (!target) {
+    for (const [id, n] of Object.entries(nodes)) {
+      if (n && typeof n === 'object' && (n as any).class_type === 'CLIPTextEncode') {
+        target = id
+        break
+      }
+    }
+  }
+  if (target && nodes[target]) {
+    const n = nodes[target]
+    n.inputs = n.inputs && typeof n.inputs === 'object' ? n.inputs : {}
+    n.inputs.text = prompt
+  }
+  return workflow
+}
+
+function loadComfyWorkflowOverride(env: NodeJS.ProcessEnv): Record<string, unknown> | null {
+  const file = (env.IMAGE_GEN_WORKFLOW ?? '').trim()
+  if (!file) return null
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'))
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null
+  } catch {
+    // 覆盖文件读/解析失败：回落内置默认模板，不崩
+    return null
+  }
+}
+
+interface ComfyImageRef {
+  filename: string
+  subfolder: string
+  type: string
+}
+
+/** 从 /history 响应里找第一张图（outputs[*].images[{filename,subfolder,type}]）。 */
+function extractComfyImage(bytes: Uint8Array): ComfyImageRef | null {
+  let json: any
+  try {
+    json = JSON.parse(new TextDecoder().decode(bytes))
+  } catch {
+    return null
+  }
+  if (!json || typeof json !== 'object') return null
+  const scan = (entry: any): ComfyImageRef | null => {
+    const outputs = entry?.outputs
+    if (!outputs || typeof outputs !== 'object') return null
+    for (const node of Object.values(outputs) as any[]) {
+      const images = node?.images
+      if (!Array.isArray(images)) continue
+      for (const im of images) {
+        if (im && typeof im.filename === 'string' && im.filename) {
+          return {
+            filename: im.filename,
+            subfolder: typeof im.subfolder === 'string' ? im.subfolder : '',
+            type: typeof im.type === 'string' ? im.type : 'output',
+          }
+        }
+      }
+    }
+    return null
+  }
+  // 常见形状：{ "<prompt_id>": { outputs: {...} } }；也兼容直接 { outputs: {...} }
+  const direct = scan(json)
+  if (direct) return direct
+  for (const v of Object.values(json)) {
+    const r = scan(v)
+    if (r) return r
+  }
+  return null
+}
+
+/**
+ * ComfyUI 文生图：POST /prompt 提交工作流 → 轮询 /history/{prompt_id} 拿 outputs → GET /view 下载二进制。
+ * 只在配置的 IMAGE_GEN_URL（本机/可信 ComfyUI）上请求；超时 = MEDIA_TIMEOUT_MS；只返回栅格图；失败返回 null。
+ */
+async function generateComfyImage(baseUrl: string, prompt: string, env: NodeJS.ProcessEnv, key: string): Promise<MediaBytes | null> {
+  const base = baseUrl.replace(/\/+$/, '')
+  const deadline = Date.now() + timeoutMs(env)
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  if (key) headers.authorization = 'Bearer ' + key
+
+  const steps = envInt(env, ['IMAGE_GEN_STEPS'], 20, 150)
+  const width = envInt(env, ['IMAGE_GEN_WIDTH'], 512, 2048)
+  const height = envInt(env, ['IMAGE_GEN_HEIGHT'], 512, 2048)
+  const cfg = envInt(env, ['IMAGE_GEN_CFG'], 7, 30)
+  const seed = envInt(env, ['IMAGE_GEN_SEED'], 0, 2_147_483_647) || Math.floor(Math.random() * 2_000_000_000)
+  const ckpt = (env.IMAGE_GEN_CKPT ?? '').trim() || 'v1-5-pruned-emaonly.safetensors'
+  const negative = (env.IMAGE_GEN_NEGATIVE ?? '').trim()
+  const sampler = (env.IMAGE_GEN_SAMPLER ?? '').trim() || 'euler'
+
+  // 工作流：IMAGE_GEN_WORKFLOW 覆盖文件优先，否则内置默认模板；随后注入正向提示词
+  const workflow =
+    loadComfyWorkflowOverride(env) ??
+    defaultComfyWorkflow({ ckpt, positive: prompt, negative, width, height, steps, cfg, sampler, seed })
+  injectComfyPrompt(workflow, prompt, (env.IMAGE_GEN_PROMPT_NODE ?? '').trim() || undefined)
+
+  const clientId = randomBytes(8).toString('hex')
+  const submit = await fetchCapped(
+    `${base}/prompt`,
+    { method: 'POST', headers, body: JSON.stringify({ prompt: workflow, client_id: clientId }) },
+    env,
+  )
+  if (!submit) return null
+  let promptId = ''
+  try {
+    const j = JSON.parse(new TextDecoder().decode(submit.bytes)) as Record<string, unknown>
+    promptId = typeof j.prompt_id === 'string' ? j.prompt_id : ''
+  } catch {
+    return null
+  }
+  if (!promptId) return null
+
+  // 轮询 history 直到 outputs 就绪或整体超时
+  for (;;) {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return null
+    const pollEnv: NodeJS.ProcessEnv = { ...env, MEDIA_TIMEOUT_MS: String(Math.max(200, Math.min(remaining, 5000))) }
+    const hist = await fetchCapped(`${base}/history/${encodeURIComponent(promptId)}`, { method: 'GET', headers }, pollEnv)
+    if (hist) {
+      const ref = extractComfyImage(hist.bytes)
+      if (ref) {
+        const viewUrl = appendQuery(`${base}/view`, { filename: ref.filename, subfolder: ref.subfolder, type: ref.type })
+        const fileRes = await fetchCapped(viewUrl, { method: 'GET', headers }, pollEnv)
+        if (!fileRes) return null
+        const ct = baseType(fileRes.type)
+        if (isAllowedRasterImage(ct)) return { bytes: fileRes.bytes, type: ct }
+        const sniffed = baseType(sniffImageType(fileRes.bytes))
+        return isAllowedRasterImage(sniffed) ? { bytes: fileRes.bytes, type: sniffed } : null
+      }
+    }
+    const wait = Math.min(400, Math.max(0, deadline - Date.now()))
+    if (wait <= 0) return null
+    await new Promise((r) => setTimeout(r, wait))
+  }
+}
+
 /**
  * 真实出图 provider（可插拔 `IMAGE_GEN_KIND`）。未配置 `IMAGE_GEN_URL` → 返回 null（用程序化 provider）。
  *
@@ -523,6 +725,7 @@ function appendQuery(url: string, params: Record<string, string>): string {
  * - `openai` ：POST `IMAGE_GEN_URL`（如 .../v1/images/generations），body `{prompt,n,size,response_format:'b64_json'}`，
  *              解析 `{data:[{b64_json}]}`。
  * - `generic`：POST 自定义 body（`{prompt,style?,model?,size?}`），解析 `{b64|bytes|image}` 或 `{images:[b64]}`。
+ * - `comfy`  ：ComfyUI（`IMAGE_GEN_URL=http://host:8188`）：POST `/prompt` 提交工作流 → 轮询 `/history/{id}` → GET `/view` 下载图片。
  * - 不设置 kind（auto）：兼容旧行为，按 generic 的宽松响应解析。
  *
  * 安全（H1 SSRF / M1 存储型 XSS）：**只接受内联 b64/bytes，绝不 fetch 响应里的 url**；只允许栅格图 png/jpeg/webp，
@@ -535,14 +738,16 @@ export function createHttpImageProvider(env: NodeJS.ProcessEnv = process.env): M
   const model = (env.IMAGE_GEN_MODEL ?? '').trim()
   const size = (env.IMAGE_GEN_SIZE ?? '').trim()
   const kindRaw = (env.IMAGE_GEN_KIND ?? '').trim().toLowerCase()
-  const kind: 'a1111' | 'openai' | 'generic' | 'auto' =
+  const kind: 'a1111' | 'openai' | 'generic' | 'comfy' | 'auto' =
     kindRaw === 'a1111' || kindRaw === 'sd' || kindRaw === 'sdwebui' || kindRaw === 'automatic1111'
       ? 'a1111'
       : kindRaw === 'openai'
         ? 'openai'
-        : kindRaw === 'generic' || kindRaw === 'custom'
-          ? 'generic'
-          : 'auto'
+        : kindRaw === 'comfy' || kindRaw === 'comfyui'
+          ? 'comfy'
+          : kindRaw === 'generic' || kindRaw === 'custom'
+            ? 'generic'
+            : 'auto'
 
   const steps = envInt(env, ['IMAGE_GEN_STEPS'], 20, 150)
   const width = envInt(env, ['IMAGE_GEN_WIDTH'], 512, 2048)
@@ -554,6 +759,9 @@ export function createHttpImageProvider(env: NodeJS.ProcessEnv = process.env): M
     name: `http-image:${kind}`,
     async genImage(input: GenImageInput): Promise<MediaBytes | null> {
       const prompt = buildImagePrompt(input)
+      if (kind === 'comfy') {
+        return generateComfyImage(url, prompt, env, key)
+      }
       let payload: Record<string, unknown>
       if (kind === 'a1111') {
         payload = { prompt, steps, width, height }

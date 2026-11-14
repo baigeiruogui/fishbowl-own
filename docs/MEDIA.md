@@ -54,7 +54,7 @@ interface MediaProvider {
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `IMAGE_GEN_URL` | 空 | 配了就启用**真实出图**。OpenAI 兼容 images / A1111 txt2img / 自定义 endpoint。留空=只用程序化 SVG |
-| `IMAGE_GEN_KIND` | `auto` | 出图协议：`a1111` / `openai` / `generic`；留空（auto）= 兼容旧行为（按 generic 宽松解析） |
+| `IMAGE_GEN_KIND` | `auto` | 出图协议：`a1111` / `openai` / `generic` / `comfy`；留空（auto）= 兼容旧行为（按 generic 宽松解析） |
 | `IMAGE_GEN_KEY` | 空 | 图片服务密钥，作为 `Authorization: Bearer <key>` 发送。**不会进日志** |
 | `IMAGE_GEN_MODEL` | 空 | 可选，作为请求体 `model` 字段（openai/generic） |
 | `IMAGE_GEN_SIZE` | 空 | 可选，作为请求体 `size` 字段（openai 默认 `1024x1024`；generic 原样下发） |
@@ -62,7 +62,12 @@ interface MediaProvider {
 | `IMAGE_GEN_WIDTH` | `512` | a1111 `width` |
 | `IMAGE_GEN_HEIGHT` | `512` | a1111 `height` |
 | `IMAGE_GEN_NEGATIVE` | 空 | a1111 `negative_prompt`（可选） |
-| `IMAGE_GEN_SAMPLER` | 空 | a1111 `sampler_name`（可选，如 `Euler a`） |
+| `IMAGE_GEN_SAMPLER` | 空 | a1111 `sampler_name`（可选，如 `Euler a`）；comfy 默认 `euler` |
+| `IMAGE_GEN_CKPT` | `v1-5-pruned-emaonly.safetensors` | comfy：CheckpointLoaderSimple 的 `ckpt_name` |
+| `IMAGE_GEN_CFG` | `7` | comfy：KSampler `cfg` |
+| `IMAGE_GEN_SEED` | 随机 | comfy：KSampler `seed`（不填则每次随机） |
+| `IMAGE_GEN_WORKFLOW` | 空 | comfy：用文件里的 ComfyUI API 工作流 JSON 覆盖内置默认模板 |
+| `IMAGE_GEN_PROMPT_NODE` | 空 | comfy：正向提示词注入的目标节点 id（默认自动：节点6 → 采样器 positive 连接 → 首个 CLIPTextEncode） |
 | `SONG_URL` | 空 | 配了就启用**真实点歌**。留空=点歌仅记录（不产音频） |
 | `SONG_KEY` | 空 | 点歌密钥；缺省回落到 `IMAGE_GEN_KEY` |
 | `SONG_METHOD` | `GET` | `GET`（默认，`?title=` 传参）或 `POST`（JSON `{title}`） |
@@ -73,7 +78,7 @@ interface MediaProvider {
 > 最小配置：只设 `IMAGE_GEN_URL`（+ `IMAGE_GEN_KEY`）就能「真出图」，点歌仍是本地记录。
 > 只设 `SONG_URL` 就能「真点歌」，出图仍是程序化 SVG。两个都设，两者都真。
 
-### 三种 IMAGE_GEN_KIND 启动示例
+### 四种 IMAGE_GEN_KIND 启动示例
 
 **a1111（本地 Stable Diffusion WebUI / A1111）**
 
@@ -114,9 +119,30 @@ IMAGE_GEN_URL=http://127.0.0.1:9000/generate
 
 请求体：`{prompt, style?, model?, size?}`；响应接受 `{b64|bytes|image}` 或 `{images:[b64]}`。
 
-**ComfyUI**：ComfyUI 原生 `/prompt` 是工作流队列式 API、非同步出图，本 provider 不内置其协议；推荐二选一：
-1) 在 ComfyUI 装 `ComfyUI-to-API` / `comfyui-api` 之类把工作流包成「POST 一段 JSON → 同步返回内联 b64」的 HTTP 服务，然后按 `IMAGE_GEN_KIND=generic` 配置；或
-2) 直接用 A1111 WebUI（`--api`）走 `a1111` kind，最省事。
+**comfy（本地 ComfyUI，`/prompt` → `/history/{id}` → `/view` 文生图）**
+
+```bash
+# 启动 ComfyUI（默认 API 监听 8188）；IMAGE_GEN_URL 填 ComfyUI 根地址
+#   python main.py --listen 0.0.0.0 --port 8188
+IMAGE_GEN_KIND=comfy
+IMAGE_GEN_URL=http://127.0.0.1:8188
+IMAGE_GEN_CKPT=v1-5-pruned-emaonly.safetensors   # 换成你 models/checkpoints 下的文件名
+IMAGE_GEN_STEPS=24
+IMAGE_GEN_WIDTH=512
+IMAGE_GEN_HEIGHT=512
+IMAGE_GEN_CFG=7
+# IMAGE_GEN_NEGATIVE=lowres, blurry
+# IMAGE_GEN_SEED=123456          # 不填则每次随机
+# IMAGE_GEN_WORKFLOW=/path/my-workflow.json   # 可选：用你自己的 API 工作流覆盖内置模板
+# IMAGE_GEN_PROMPT_NODE=6        # 可选：正向提示词注入到哪个节点（默认自动识别）
+# IMAGE_GEN_KEY=                 # 本地一般不需要
+```
+
+流程：`POST {url}/prompt`（body `{prompt:<workflow JSON>, client_id}`）→ 拿 `prompt_id` →
+轮询 `GET {url}/history/{prompt_id}` 直到有 `outputs`（整体超时 `MEDIA_TIMEOUT_MS`）→
+从 `outputs[*].images[{filename,subfolder,type}]` 取第一张 → `GET {url}/view?filename=&subfolder=&type=` 下载二进制 → 校验为栅格图返回。
+
+内置默认 txt2img 工作流：`CheckpointLoaderSimple(IMAGE_GEN_CKPT) → CLIPTextEncode 正/负 → EmptyLatentImage(IMAGE_GEN_WIDTH/HEIGHT) → KSampler(steps=IMAGE_GEN_STEPS,cfg=IMAGE_GEN_CFG) → VAEDecode → SaveImage`；正向提示词自动注入正向 `CLIPTextEncode`（可用 `IMAGE_GEN_WORKFLOW` 换成自己的工作流，用 `IMAGE_GEN_PROMPT_NODE` 指定注入节点）。
 
 > 所有 kind 的共同安全约束：**只接受内联 `b64`/`bytes`，绝不 fetch 响应里的 url**（防 SSRF）；只允许栅格图 `png/jpeg/webp`，`svg/xml` 一律拒绝；超时/超限/失败回落程序化；key 只进 `Authorization` 头、不进日志。
 
@@ -133,6 +159,8 @@ IMAGE_GEN_URL=http://127.0.0.1:9000/generate
 { "prompt": "…", "n": 1, "size": "1024x1024", "response_format": "b64_json", "model": "…" }
 // generic / auto
 { "prompt": "码头晚霞 — 一只橘猫 — style: photo", "style": "photo", "model": "…", "size": "…" }
+// comfy（不是单个 body，而是三步：/prompt → /history/{id} → /view，见上一节）
+{ "prompt": { /* ComfyUI API workflow JSON（含注入后的正向提示词） */ }, "client_id": "…" }
 ```
 
 `prompt` 由 `title + prompt + style` 组合而成；`model` / `size` 仅在配置了对应环境变量时出现。

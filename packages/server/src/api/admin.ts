@@ -13,6 +13,8 @@ export interface AdminDeps {
   /** 管理员接口限流（默认 120 次 / 10 分钟，按 IP） */
   adminMax?: number
   windowMs?: number
+  /** 入驻费（元），用于 payment 事件记录 */
+  joinPriceYuan?: number
 }
 
 function fishView(f: Fish) {
@@ -32,6 +34,24 @@ function fishView(f: Fish) {
 
 export const adminRoutes: FastifyPluginAsync<AdminDeps> = async (app: FastifyInstance, opts) => {
   const { db, adminToken } = opts
+  const joinPriceYuan = opts.joinPriceYuan ?? 0
+
+  /** 核销支付：pending_payment → active，并记 event(kind=payment)。 */
+  const confirmPaid = (id: string) => {
+    const fish = getFish(db, id)
+    if (!fish) throw new DomainError('NOT_FOUND', `fish not found: ${id}`)
+    if (fish.status === 'banned') throw new DomainError('CONFLICT', '该鱼已被封禁，请先 unban 再 approve')
+    if ((fish.status as string) === 'pending_payment') {
+      db.prepare('INSERT INTO event(fish_id, kind, data_json, ts, read_at) VALUES(?,?,?,?,NULL)').run(
+        id,
+        'payment',
+        JSON.stringify({ priceYuan: joinPriceYuan, paid: true, by: 'admin' }),
+        Math.floor(Date.now() / 1000),
+      )
+    }
+    db.prepare(`UPDATE fish SET status = 'active' WHERE id = ?`).run(id)
+    return fishView(getFish(db, id)!)
+  }
   // /api/admin/* 全局限流（按 IP），防止管理员 token 泄露后被刷
   app.addHook('onRequest', createRateLimiter({ windowMs: opts.windowMs ?? 10 * 60_000, max: opts.adminMax ?? 120, keyOf: perIpKey }))
   const guard = (fn: (ctx: { req: FastifyRequest; reply: FastifyReply }) => Promise<unknown> | unknown) => {
@@ -88,11 +108,16 @@ export const adminRoutes: FastifyPluginAsync<AdminDeps> = async (app: FastifyIns
     '/fish/:id/approve',
     guard(({ req }) => {
       const { id } = req.params as { id: string }
-      const fish = getFish(db, id)
-      if (!fish) throw new DomainError('NOT_FOUND', `fish not found: ${id}`)
-      if (fish.status === 'banned') throw new DomainError('CONFLICT', '该鱼已被封禁，请先 unban 再 approve')
-      db.prepare(`UPDATE fish SET status = 'active' WHERE id = ?`).run(id)
-      return { ok: true, fish: fishView(getFish(db, id)!) }
+      return { ok: true, fish: confirmPaid(id) }
+    }),
+  )
+
+  // 同义别名：核销支付
+  app.post(
+    '/fish/:id/pay_confirm',
+    guard(({ req }) => {
+      const { id } = req.params as { id: string }
+      return { ok: true, fish: confirmPaid(id) }
     }),
   )
 

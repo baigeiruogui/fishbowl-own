@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { registerOwner } from '../api.ts'
+import { useEffect, useState } from 'react'
+import { loadJoinInfo, mockJoinInfo, registerOwner } from '../api.ts'
+import type { JoinInfo } from '../types.ts'
 import { ErrorBox, ServerBadge } from '../components/ui.tsx'
 import { helpHref, ownerHref } from '../router.ts'
 
@@ -22,6 +23,21 @@ export function JoinPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [qrBroken, setQrBroken] = useState(false)
+  const [info, setInfo] = useState<JoinInfo | null>(null)
+  useEffect(() => {
+    let alive = true
+    loadJoinInfo()
+      .then((i) => {
+        if (alive) setInfo(i)
+      })
+      .catch(() => {
+        if (alive) setInfo(mockJoinInfo())
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
   const allChecked = checked.every(Boolean)
 
   async function onJoin() {
@@ -95,6 +111,48 @@ export function JoinPage() {
             </div>
           ))}
         </div>
+      </section>
+
+      <section className="panel">
+        <header className="panel__head">
+          <h2>入驻费与付款</h2>
+          <span className="panel__hint">GET /api/public/join-info</span>
+        </header>
+        <div className="fee-card">
+          <div className="fee-card__price">
+            <span className="fee-card__label">入驻费</span>
+            <span className="fee-card__num">
+              {info ? (info.priceYuan > 0 ? `¥${info.priceYuan}` : '免费') : '¥…'}
+            </span>
+            <span className="fee-card__unit">{info && info.priceYuan > 0 ? '/ 每条约' : ''}</span>
+          </div>
+          <div className="fee-card__body">
+            <p className="fee-card__note">
+              {info?.paymentNote || '注册后在主人页建鱼，建好的鱼会处于「待付款」，付款后由镇长核销开通。'}
+            </p>
+            <p className="fee-card__hint">
+              {info && info.priceYuan > 0
+                ? '含 1 条鱼的入驻名额；建好的鱼先显示「待付款」，核销后转为「在镇」并正式接入小镇。'
+                : '当前为免费入驻，建鱼后直接开通。'}
+            </p>
+          </div>
+          <div className="fee-card__qr">
+            {info?.qrUrl && !qrBroken ? (
+              <img className="fee-qr__img" src={info.qrUrl} alt="收款码" onError={() => setQrBroken(true)} />
+            ) : (
+              <div className="fee-qr__placeholder">
+                <span className="fee-qr__icon" aria-hidden="true">💳</span>
+                <span>联系镇长</span>
+                <small>{info?.qrUrl && qrBroken ? '收款码暂不可用' : '收款码待配置'}</small>
+              </div>
+            )}
+          </div>
+        </div>
+        <p className="panel__foot">
+          付款后把「主人昵称 + 鱼名」发给镇长核销；核销完成即可在{' '}
+          <a href={ownerHref}>主人页</a> 看到鱼的「待付款」变成「在镇」。
+          {info?.mock ? ' （当前为演示价）' : ''}
+        </p>
       </section>
 
       <section className="panel">

@@ -18,6 +18,8 @@ export interface OwnerDeps {
   startBalance: number
   /** true = 新鱼直接 active；false = 新鱼 pending 待管理员 approve（默认 false） */
   openRegistration?: boolean
+  /** 入驻费（元），0 = 免费 */
+  joinPriceYuan: number
 }
 
 type Principal = { kind: 'admin' } | { kind: 'owner'; ownerId: string; name: string }
@@ -27,7 +29,7 @@ const MAX_INTRO = 200
 const MAX_PERSONA = 500
 const MAX_FISH_PER_OWNER = 3
 
-function fishView(f: Fish) {
+function fishView(f: Fish, joinPriceYuan = 0) {
   return {
     id: f.id,
     ownerId: f.ownerId,
@@ -41,11 +43,13 @@ function fishView(f: Fish) {
     balance: f.balance,
     dayCap: f.dayCap,
     createdAt: f.createdAt,
+    payment: (f.status as string) === 'pending_payment' ? { priceYuan: joinPriceYuan, paid: false } : null,
   }
 }
 
 export const ownerRoutes: FastifyPluginAsync<OwnerDeps> = async (app: FastifyInstance, opts) => {
   const { db, adminToken, startBalance } = opts
+  const joinPriceYuan = opts.joinPriceYuan ?? 0
   const openRegistration = opts.openRegistration === true
   ensureOwnerTables(db)
 
@@ -90,6 +94,7 @@ export const ownerRoutes: FastifyPluginAsync<OwnerDeps> = async (app: FastifyIns
     avatar: avatarUrl(f.id),
     hasCode,
     createdAt: f.createdAt,
+    payment: (f.status as string) === 'pending_payment' ? { priceYuan: joinPriceYuan, paid: false } : null,
   })
 
   const ownerSelfPayload = (principal: Principal) => {
@@ -164,13 +169,21 @@ export const ownerRoutes: FastifyPluginAsync<OwnerDeps> = async (app: FastifyIns
             ? startBalance
             : requireInt(body.balance, 'balance', { min: 0 })
       const ownerId = principal.kind === 'owner' ? principal.ownerId : typeof body.owner_id === 'string' ? body.owner_id : null
-      const targetStatus = (principal.kind === 'owner' ? (openRegistration ? 'active' : 'pending') : 'active') as unknown as Fish['status']
+      const targetStatus = (
+        principal.kind === 'owner'
+          ? joinPriceYuan > 0
+            ? 'pending_payment'
+            : openRegistration
+              ? 'active'
+              : 'pending'
+          : 'active'
+      ) as unknown as Fish['status']
 
       const created = createFish(db, { name, kind, persona, intro, balance, ownerId })
       if (created.status !== targetStatus) db.prepare('UPDATE fish SET status = ? WHERE id = ?').run(targetStatus, created.id)
       const fish = getFish(db, created.id)!
       const { code } = issueResidentCode(db, fish.id)
-      return { ok: true, fish: fishView(fish), code, status: fish.status }
+      return { ok: true, fish: fishView(fish, joinPriceYuan), code, status: fish.status }
     }),
   )
 
@@ -197,7 +210,7 @@ export const ownerRoutes: FastifyPluginAsync<OwnerDeps> = async (app: FastifyIns
         .all(id) as unknown as { reason: string; total: number; n: number }[]
       return {
         ok: true,
-        fish: fishView(fish),
+        fish: fishView(fish, joinPriceYuan),
         hasCode,
         ledgerSummary: summary.map((s) => ({ reason: s.reason, total: Number(s.total), n: Number(s.n) })),
       }
@@ -211,7 +224,7 @@ export const ownerRoutes: FastifyPluginAsync<OwnerDeps> = async (app: FastifyIns
       const { id } = req.params as { id: string }
       assertAccess(id, principal)
       db.prepare(`UPDATE fish SET status = 'paused' WHERE id = ?`).run(id)
-      return { ok: true, fish: fishView(getFish(db, id)!) }
+      return { ok: true, fish: fishView(getFish(db, id)!, joinPriceYuan) }
     }),
   )
 
@@ -221,7 +234,7 @@ export const ownerRoutes: FastifyPluginAsync<OwnerDeps> = async (app: FastifyIns
       const { id } = req.params as { id: string }
       assertAccess(id, principal)
       db.prepare(`UPDATE fish SET status = 'active' WHERE id = ?`).run(id)
-      return { ok: true, fish: fishView(getFish(db, id)!) }
+      return { ok: true, fish: fishView(getFish(db, id)!, joinPriceYuan) }
     }),
   )
 
@@ -237,7 +250,7 @@ export const ownerRoutes: FastifyPluginAsync<OwnerDeps> = async (app: FastifyIns
         const cap = requireInt(body.day_cap, 'day_cap', { min: 0 })
         db.prepare('UPDATE fish SET day_cap = ? WHERE id = ?').run(cap, id)
       }
-      return { ok: true, fish: fishView(getFish(db, id)!) }
+      return { ok: true, fish: fishView(getFish(db, id)!, joinPriceYuan) }
     }),
   )
 

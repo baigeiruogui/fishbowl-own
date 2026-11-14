@@ -44,6 +44,12 @@ export interface BuildOptions {
   openRegistration?: boolean
   /** 反代信任：true 时按 x-forwarded-for 解析真实客户端 IP（默认读 env TRUST_PROXY） */
   trustProxy?: boolean
+  /** 入驻费（元），0 = 免费；默认读 env JOIN_PRICE_YUAN（默认 10） */
+  joinPriceYuan?: number
+  /** 支付说明（默认读 env PAYMENT_NOTE） */
+  paymentNote?: string
+  /** 收款二维码 URL（可选，默认读 env PAYMENT_QR_URL） */
+  paymentQrUrl?: string
 }
 
 export async function buildServer(opts: BuildOptions = {}) {
@@ -64,6 +70,9 @@ export async function buildServer(opts: BuildOptions = {}) {
 
   // ADMIN_TOKEN 为空：只告警，不开放 owner 写（ownerRoutes 的 isAdmin 会拒绝所有请求）
   const adminToken = opts.adminToken ?? cfg.adminToken
+  const joinPriceYuan = opts.joinPriceYuan ?? cfg.joinPriceYuan
+  const paymentNote = opts.paymentNote ?? cfg.paymentNote
+  const paymentQrUrl = opts.paymentQrUrl ?? cfg.paymentQrUrl
   if (!adminToken) {
     app.log.warn('ADMIN_TOKEN 未配置：主人 API 将拒绝所有请求（仅 public / resident 可用）')
   }
@@ -118,11 +127,19 @@ export async function buildServer(opts: BuildOptions = {}) {
     adminToken,
     startBalance: cfg.startBalance,
     openRegistration: opts.openRegistration ?? process.env.OPEN_REGISTRATION === 'true',
+    joinPriceYuan,
   })
-  // 全局管理员 API（列全部鱼 / 审批 / 封禁 / 解封）
-  await app.register(adminRoutes, { prefix: '/api/admin', db, adminToken, adminMax: opts.rateLimit?.adminMax, windowMs: opts.rateLimit?.windowMs })
+  // 全局管理员 API（列全部鱼 / 审批 / 封禁 / 解封 / 支付核销）
+  await app.register(adminRoutes, {
+    prefix: '/api/admin',
+    db,
+    adminToken,
+    adminMax: opts.rateLimit?.adminMax,
+    windowMs: opts.rateLimit?.windowMs,
+    joinPriceYuan,
+  })
   // 公开只读 API（web 用）
-  await app.register(publicRoutes, { prefix: '/api/public', db, townName: opts.townName })
+  await app.register(publicRoutes, { prefix: '/api/public', db, townName: opts.townName, joinPriceYuan, paymentNote, paymentQrUrl })
   // P2 公开只读：大厅 / 单桌 / 排行榜 / 日报
   await app.register(publicP2Routes, { prefix: '/api/public', db, driver })
   // P3 公开只读：法庭 / 关系 / 小手机（隐私占位）

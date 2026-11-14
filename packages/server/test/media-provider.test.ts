@@ -2,7 +2,7 @@ import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildServer } from '../src/index.ts'
@@ -12,6 +12,8 @@ import { getAlbumFile, orderSong, takePhoto } from '../src/domain/media.ts'
 import {
   createHttpImageProvider,
   createHttpSongProvider,
+  defaultComfyWorkflow,
+  injectComfyPrompt,
   programmaticProvider,
   resolveMediaProvider,
 } from '../src/domain/media-provider.ts'
@@ -562,6 +564,259 @@ test('外部出图超时 / 5xx 失败 → 回落程序化 SVG', async () => {
     const e = await err.genImage({ prompt: '5xx 也出图' })
     assert.ok(e && e.type === 'image/svg+xml; charset=utf-8')
     assert.ok(new TextDecoder().decode(e!.bytes).includes('5xx 也出图'))
+  } finally {
+    server.closeAllConnections?.()
+    await new Promise<void>((r) => server.close(() => r()))
+  }
+})
+
+// 18) IMAGE_GEN_KIND=comfy：/prompt→/history→/view 全链路，正向提示词注入 + 落盘 png
+test('IMAGE_GEN_KIND=comfy：/prompt→/history→/view 返回 png，工作流注入正提示词并落盘 png', async () => {
+  let submit: any = null
+  const viewUrls: string[] = []
+  const server = createServer(async (req, res) => {
+    const u = req.url ?? ''
+    if (u.startsWith('/prompt')) {
+      const raw = await collectBody(req)
+      try {
+        submit = JSON.parse(raw)
+      } catch {
+        submit = {}
+      }
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ prompt_id: 'pid-abc' }))
+      return
+    }
+    if (u.startsWith('/history/pid-abc')) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          'pid-abc': { outputs: { '9': { images: [{ filename: 'fish_0001.png', subfolder: '', type: 'output' }] } } },
+        }),
+      )
+      return
+    }
+    if (u.startsWith('/view')) {
+      viewUrls.push(u)
+      res.writeHead(200, { 'content-type': 'image/png' })
+      res.end(PNG_BYTES)
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  try {
+    const provider = createHttpImageProvider({
+      IMAGE_GEN_URL: base, // ComfyUI 根
+      IMAGE_GEN_KIND: 'comfy',
+      MEDIA_TIMEOUT_MS: '4000',
+      IMAGE_GEN_STEPS: '9',
+      IMAGE_GEN_WIDTH: '64',
+      IMAGE_GEN_HEIGHT: '48',
+      IMAGE_GEN_CKPT: 'model.safetensors',
+    })
+    assert.ok(provider)
+    const img = await provider!.genImage({ prompt: '一只赛博猫' })
+    assert.ok(img)
+    assert.equal(img!.type, 'image/png')
+    assert.deepEqual(Buffer.from(img!.bytes), PNG_BYTES)
+
+    // 提交的工作流：内置模板结构 + 正向提示词注入到 CLIPTextEncode('6')
+    assert.ok(submit && submit.prompt, '应 POST {prompt: workflow, client_id}')
+    const wf = submit.prompt
+    assert.equal(wf['3'].class_type, 'KSampler')
+    assert.equal(wf['3'].inputs.steps, 9)
+    assert.equal(wf['4'].class_type, 'CheckpointLoaderSimple')
+    assert.equal(wf['4'].inputs.ckpt_name, 'model.safetensors')
+    assert.equal(wf['5'].class_type, 'EmptyLatentImage')
+    assert.equal(wf['5'].inputs.width, 64)
+    assert.equal(wf['5'].inputs.height, 48)
+    assert.equal(wf['6'].class_type, 'CLIPTextEncode')
+    assert.ok(String(wf['6'].inputs.text).includes('一只赛博猫'))
+    assert.ok(submit.client_id)
+
+    // /view 携带 filename 取回二进制
+    assert.equal(viewUrls.length, 1)
+    assert.ok(viewUrls[0].includes('filename=fish_0001.png'))
+
+    // 落盘 png
+    const db = openDb(':memory:')
+    const fish = createFish(db, { name: 'Comfy鱼', balance: 100 })
+    const entry = await takePhoto(db, fish.id, { scene: 'Comfy 出图' }, 1000, provider!)
+    assert.ok(entry.path && entry.path.endsWith('.png'), `应存成 png，实际 ${entry.path}`)
+    assert.deepEqual(readFileSync(entry.path!), PNG_BYTES)
+    db.close()
+  } finally {
+    server.closeAllConnections?.()
+    await new Promise<void>((r) => server.close(() => r()))
+  }
+})
+
+// 19) comfy：history 一直无 outputs → 超时回落程序化；/prompt 5xx → 失败回落
+test('IMAGE_GEN_KIND=comfy：超时 / 5xx 失败均回落程序化 SVG', async () => {
+  // 超时：/prompt 正常，/history 一直 {}（无 outputs）
+  const slowServer = createServer(async (req, res) => {
+    const u = req.url ?? ''
+    if (u.startsWith('/prompt')) {
+      await collectBody(req)
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ prompt_id: 'p2' }))
+      return
+    }
+    if (u.startsWith('/history/')) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end('{}')
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise<void>((r) => slowServer.listen(0, '127.0.0.1', () => r()))
+  const slowBase = `http://127.0.0.1:${(slowServer.address() as AddressInfo).port}`
+  try {
+    const t0 = Date.now()
+    const out = await resolveMediaProvider({ IMAGE_GEN_URL: slowBase, IMAGE_GEN_KIND: 'comfy', MEDIA_TIMEOUT_MS: '500' }).genImage({
+      prompt: 'comfy超时也出图',
+    })
+    assert.ok(out && out.type === 'image/svg+xml; charset=utf-8')
+    assert.ok(new TextDecoder().decode(out!.bytes).includes('comfy超时也出图'))
+    assert.ok(Date.now() - t0 < 5000, '应在超时后快速回落')
+  } finally {
+    slowServer.closeAllConnections?.()
+    await new Promise<void>((r) => slowServer.close(() => r()))
+  }
+
+  // 失败：/prompt 直接 500
+  const errServer = createServer(async (req, res) => {
+    await collectBody(req)
+    res.writeHead(500)
+    res.end('boom')
+  })
+  await new Promise<void>((r) => errServer.listen(0, '127.0.0.1', () => r()))
+  const errBase = `http://127.0.0.1:${(errServer.address() as AddressInfo).port}`
+  try {
+    const out = await resolveMediaProvider({ IMAGE_GEN_URL: errBase, IMAGE_GEN_KIND: 'comfy', MEDIA_TIMEOUT_MS: '1000' }).genImage({
+      prompt: 'comfy5xx也出图',
+    })
+    assert.ok(out && out.type === 'image/svg+xml; charset=utf-8')
+    assert.ok(new TextDecoder().decode(out!.bytes).includes('comfy5xx也出图'))
+  } finally {
+    errServer.closeAllConnections?.()
+    await new Promise<void>((r) => errServer.close(() => r()))
+  }
+})
+
+// 20) comfy：/view 返回 svg 被拒（只接受栅格图）
+test('IMAGE_GEN_KIND=comfy：/view 返回 svg 被拒绝（provider 返回 null）', async () => {
+  const server = createServer(async (req, res) => {
+    const u = req.url ?? ''
+    if (u.startsWith('/prompt')) {
+      await collectBody(req)
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ prompt_id: 'p3' }))
+      return
+    }
+    if (u.startsWith('/history/p3')) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ p3: { outputs: { '9': { images: [{ filename: 'x.svg', subfolder: '', type: 'output' }] } } } }))
+      return
+    }
+    if (u.startsWith('/view')) {
+      res.writeHead(200, { 'content-type': 'image/svg+xml' })
+      res.end('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  try {
+    const provider = createHttpImageProvider({ IMAGE_GEN_URL: base, IMAGE_GEN_KIND: 'comfy', MEDIA_TIMEOUT_MS: '2000' })
+    assert.equal(await provider!.genImage({ prompt: 'x' }), null)
+  } finally {
+    server.closeAllConnections?.()
+    await new Promise<void>((r) => server.close(() => r()))
+  }
+})
+
+// 21) injectComfyPrompt：默认节点 '6' / 显式节点 / 第一个 CLIPTextEncode 的注入规则
+test('injectComfyPrompt：优先节点6，其次显式，其次第一个 CLIPTextEncode', () => {
+  const wf6 = defaultComfyWorkflow({
+    ckpt: 'a.safetensors',
+    positive: 'old',
+    negative: 'neg',
+    width: 512,
+    height: 512,
+    steps: 20,
+    cfg: 7,
+    sampler: 'euler',
+    seed: 1,
+  })
+  injectComfyPrompt(wf6, '新提示词')
+  assert.equal((wf6 as any)['6'].inputs.text, '新提示词')
+
+  const wfCustom = { pos: { class_type: 'CLIPTextEncode', inputs: { text: 'old' } }, neg: { class_type: 'CLIPTextEncode', inputs: { text: 'b' } } }
+  injectComfyPrompt(wfCustom, '首节点注入')
+  assert.equal((wfCustom as any).pos.inputs.text, '首节点注入') // 无节点6/无采样器 → 第一个 CLIPTextEncode
+
+  const wfExplicit = { '6': { class_type: 'CLIPTextEncode', inputs: { text: 'a' } }, '7': { class_type: 'CLIPTextEncode', inputs: { text: 'b' } } }
+  injectComfyPrompt(wfExplicit, '显式指定', '7')
+  assert.equal((wfExplicit as any)['7'].inputs.text, '显式指定')
+})
+
+// 22) IMAGE_GEN_WORKFLOW 覆盖文件：用文件里的工作流并注入正向提示词
+test('IMAGE_GEN_WORKFLOW 覆盖：使用自定义工作流并注入正提示词', async () => {
+  const wfFile = join(TMP, 'custom-workflow.json')
+  writeFileSync(
+    wfFile,
+    JSON.stringify({
+      '3': { class_type: 'KSampler', inputs: { steps: 12, cfg: 6, sampler_name: 'euler', model: ['4', 0], positive: ['20', 0], negative: ['7', 0], latent_image: ['5', 0] } },
+      '4': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: 'custom.safetensors' } },
+      '20': { class_type: 'CLIPTextEncode', inputs: { text: 'old', clip: ['4', 1] } },
+      '7': { class_type: 'CLIPTextEncode', inputs: { text: 'neg', clip: ['4', 1] } },
+      '8': { class_type: 'VAEDecode', inputs: { samples: ['3', 0], vae: ['4', 2] } },
+      '9': { class_type: 'SaveImage', inputs: { filename_prefix: 'x', images: ['8', 0] } },
+    }),
+    'utf8',
+  )
+  let submit: any = null
+  const server = createServer(async (req, res) => {
+    const u = req.url ?? ''
+    if (u.startsWith('/prompt')) {
+      const raw = await collectBody(req)
+      try {
+        submit = JSON.parse(raw)
+      } catch {
+        submit = {}
+      }
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ prompt_id: 'p4' }))
+      return
+    }
+    if (u.startsWith('/history/p4')) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ p4: { outputs: { '9': { images: [{ filename: 'y.png', subfolder: '', type: 'output' }] } } } }))
+      return
+    }
+    if (u.startsWith('/view')) {
+      res.writeHead(200, { 'content-type': 'image/png' })
+      res.end(PNG_BYTES)
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()))
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  try {
+    const provider = createHttpImageProvider({ IMAGE_GEN_URL: base, IMAGE_GEN_KIND: 'comfy', IMAGE_GEN_WORKFLOW: wfFile, MEDIA_TIMEOUT_MS: '3000' })
+    const img = await provider!.genImage({ prompt: '覆盖工作流提示' })
+    assert.ok(img && img.type === 'image/png')
+    assert.equal(submit.prompt['4'].inputs.ckpt_name, 'custom.safetensors')
+    assert.ok(String(submit.prompt['20'].inputs.text).includes('覆盖工作流提示'))
   } finally {
     server.closeAllConnections?.()
     await new Promise<void>((r) => server.close(() => r()))

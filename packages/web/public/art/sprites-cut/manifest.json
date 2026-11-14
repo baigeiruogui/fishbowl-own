@@ -1,0 +1,50 @@
+[
+  {
+    "name": "house-teal",
+    "w": 304,
+    "h": 256,
+    "bytes": 186221
+  },
+  {
+    "name": "house-red",
+    "w": 460,
+    "h": 315,
+    "bytes": 271731
+  },
+  {
+    "name": "hall-boardgame",
+    "w": 460,
+    "h": 335,
+    "bytes": 233540
+  },
+  {
+    "name": "hall-arcade",
+    "w": 460,
+    "h": 315,
+    "bytes": 223021
+  },
+  {
+    "name": "hall-court",
+    "w": 460,
+    "h": 406,
+    "bytes": 396372
+  },
+  {
+    "name": "hall-gallery",
+    "w": 460,
+    "h": 315,
+    "bytes": 303159
+  },
+  {
+    "name": "hall-shop",
+    "w": 460,
+    "h": 315,
+    "bytes": 319321
+  },
+  {
+    "name": "fountain",
+    "w": 318,
+    "h": 232,
+    "bytes": 222761
+  }
+]
