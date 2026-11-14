@@ -364,6 +364,31 @@ function isAllowedAudio(type: unknown): boolean {
   return !isXmlLike(t) && ALLOWED_AUDIO_TYPES.has(t)
 }
 
+/** 解码一个内联图片项（string b64 / data-url / {b64|bytes|image} 对象）。只放行栅格图。 */
+function decodeInlineImage(item: unknown): MediaBytes | null {
+  if (typeof item === 'string' && item.trim()) {
+    const m = /^data:([^;,]+)[^,]*,/i.exec(item.trim())
+    const declared = m ? baseType(m[1]) : ''
+    const bytes = base64ToBytes(item)
+    if (!bytes) return null
+    if (declared) return isAllowedRasterImage(declared) ? { bytes, type: declared } : null
+    const sniffed = baseType(sniffImageType(bytes))
+    return isAllowedRasterImage(sniffed) ? { bytes, type: sniffed } : null
+  }
+  if (item && typeof item === 'object') {
+    const o = item as Record<string, unknown>
+    const b64 = pickString(o, ['b64_json', 'b64', 'base64', 'bytes', 'image'])
+    if (!b64) return null
+    const bytes = base64ToBytes(b64)
+    if (!bytes) return null
+    const stated = baseType(pickString(o, ['mime_type', 'type', 'content_type']) ?? '')
+    if (stated) return isAllowedRasterImage(stated) ? { bytes, type: stated } : null
+    const sniffed = baseType(sniffImageType(bytes))
+    return isAllowedRasterImage(sniffed) ? { bytes, type: sniffed } : null
+  }
+  return null
+}
+
 /**
  * 把图片接口响应解析成 {bytes,type}。
  *
@@ -397,6 +422,21 @@ async function interpretImageResponse(res: FetchedMedia): Promise<MediaBytes | n
   const candidates: Record<string, unknown>[] = []
   if (firstData && typeof firstData === 'object') candidates.push(firstData)
   candidates.push(root)
+
+  // A1111 / 自定义服务常见的 `{ images: ["<b64 png>", ...] }`：取第一张可用的内联图；
+  // url 项一律忽略（不 fetch，防 SSRF）。
+  const imagesSource = Array.isArray(root.images)
+    ? (root.images as unknown[])
+    : firstData && Array.isArray((firstData as Record<string, unknown>).images)
+      ? ((firstData as Record<string, unknown>).images as unknown[])
+      : undefined
+  if (imagesSource) {
+    for (const item of imagesSource) {
+      const parsed = decodeInlineImage(item)
+      if (parsed) return parsed
+    }
+    return null
+  }
 
   for (const c of candidates) {
     // 只认内联 b64/bytes；url / image_url 一律忽略（不 fetch，防 SSRF）
@@ -475,12 +515,18 @@ function appendQuery(url: string, params: Record<string, string>): string {
 }
 
 /**
- * OpenAI 兼容 images 接口 / 自定义图片 endpoint 的 provider。
- * 未配置 `IMAGE_GEN_URL` → 返回 null（由 resolveMediaProvider 直接用程序化 provider）。
+ * 真实出图 provider（可插拔 `IMAGE_GEN_KIND`）。未配置 `IMAGE_GEN_URL` → 返回 null（用程序化 provider）。
  *
- * 请求约定（默认 POST JSON）：`{ prompt, style, model?, size? }`，带 `Authorization: Bearer <IMAGE_GEN_KEY>`。
- * 响应支持（安全子集）：直接返回 `image/png|jpeg|webp` 字节；或 JSON `{data:[{b64_json}]}` / `{b64_json|bytes|image}`。
- * **不接受/不跟随响应里的 url**（防 SSRF）；**不接受 svg/xml**（防存储型 XSS）。
+ * kind：
+ * - `a1111`  ：POST `IMAGE_GEN_URL`（如 http://host:7860/sdapi/v1/txt2img），body `{prompt,negative_prompt?,steps,width,height,sampler_name?}`，
+ *              解析 `{images:[b64,...]}` 取第一张（PNG）。
+ * - `openai` ：POST `IMAGE_GEN_URL`（如 .../v1/images/generations），body `{prompt,n,size,response_format:'b64_json'}`，
+ *              解析 `{data:[{b64_json}]}`。
+ * - `generic`：POST 自定义 body（`{prompt,style?,model?,size?}`），解析 `{b64|bytes|image}` 或 `{images:[b64]}`。
+ * - 不设置 kind（auto）：兼容旧行为，按 generic 的宽松响应解析。
+ *
+ * 安全（H1 SSRF / M1 存储型 XSS）：**只接受内联 b64/bytes，绝不 fetch 响应里的 url**；只允许栅格图 png/jpeg/webp，
+ * svg/xml 一律拒绝；超时/大小上限/失败回落程序化；key 只进 Authorization 头，不进日志。
  */
 export function createHttpImageProvider(env: NodeJS.ProcessEnv = process.env): MediaProvider | null {
   const url = (env.IMAGE_GEN_URL ?? '').trim()
@@ -488,13 +534,41 @@ export function createHttpImageProvider(env: NodeJS.ProcessEnv = process.env): M
   const key = (env.IMAGE_GEN_KEY ?? '').trim()
   const model = (env.IMAGE_GEN_MODEL ?? '').trim()
   const size = (env.IMAGE_GEN_SIZE ?? '').trim()
+  const kindRaw = (env.IMAGE_GEN_KIND ?? '').trim().toLowerCase()
+  const kind: 'a1111' | 'openai' | 'generic' | 'auto' =
+    kindRaw === 'a1111' || kindRaw === 'sd' || kindRaw === 'sdwebui' || kindRaw === 'automatic1111'
+      ? 'a1111'
+      : kindRaw === 'openai'
+        ? 'openai'
+        : kindRaw === 'generic' || kindRaw === 'custom'
+          ? 'generic'
+          : 'auto'
+
+  const steps = envInt(env, ['IMAGE_GEN_STEPS'], 20, 150)
+  const width = envInt(env, ['IMAGE_GEN_WIDTH'], 512, 2048)
+  const height = envInt(env, ['IMAGE_GEN_HEIGHT'], 512, 2048)
+  const negative = (env.IMAGE_GEN_NEGATIVE ?? '').trim()
+  const sampler = (env.IMAGE_GEN_SAMPLER ?? '').trim()
 
   return {
-    name: 'http-image',
+    name: `http-image:${kind}`,
     async genImage(input: GenImageInput): Promise<MediaBytes | null> {
-      const payload: Record<string, unknown> = { prompt: buildImagePrompt(input), style: input.style ?? undefined }
-      if (model) payload.model = model
-      if (size) payload.size = size
+      const prompt = buildImagePrompt(input)
+      let payload: Record<string, unknown>
+      if (kind === 'a1111') {
+        payload = { prompt, steps, width, height }
+        if (negative) payload.negative_prompt = negative
+        if (sampler) payload.sampler_name = sampler
+      } else if (kind === 'openai') {
+        payload = { prompt, n: 1, size: size || '1024x1024', response_format: 'b64_json' }
+        if (model) payload.model = model
+      } else {
+        // generic / auto：尽量通用的 body
+        payload = { prompt }
+        if (input.style) payload.style = input.style
+        if (model) payload.model = model
+        if (size) payload.size = size
+      }
       const headers: Record<string, string> = { 'content-type': 'application/json' }
       if (key) headers.authorization = 'Bearer ' + key
       const res = await fetchCapped(url, { method: 'POST', headers, body: JSON.stringify(payload) }, env)

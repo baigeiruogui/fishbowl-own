@@ -53,10 +53,16 @@ interface MediaProvider {
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `IMAGE_GEN_URL` | 空 | 配了就启用**真实出图**。OpenAI 兼容 images 或自定义 endpoint。留空=只用程序化 SVG |
+| `IMAGE_GEN_URL` | 空 | 配了就启用**真实出图**。OpenAI 兼容 images / A1111 txt2img / 自定义 endpoint。留空=只用程序化 SVG |
+| `IMAGE_GEN_KIND` | `auto` | 出图协议：`a1111` / `openai` / `generic`；留空（auto）= 兼容旧行为（按 generic 宽松解析） |
 | `IMAGE_GEN_KEY` | 空 | 图片服务密钥，作为 `Authorization: Bearer <key>` 发送。**不会进日志** |
-| `IMAGE_GEN_MODEL` | 空 | 可选，作为请求体 `model` 字段 |
-| `IMAGE_GEN_SIZE` | 空 | 可选，作为请求体 `size` 字段（如 `1024x1024`） |
+| `IMAGE_GEN_MODEL` | 空 | 可选，作为请求体 `model` 字段（openai/generic） |
+| `IMAGE_GEN_SIZE` | 空 | 可选，作为请求体 `size` 字段（openai 默认 `1024x1024`；generic 原样下发） |
+| `IMAGE_GEN_STEPS` | `20` | a1111 `steps` |
+| `IMAGE_GEN_WIDTH` | `512` | a1111 `width` |
+| `IMAGE_GEN_HEIGHT` | `512` | a1111 `height` |
+| `IMAGE_GEN_NEGATIVE` | 空 | a1111 `negative_prompt`（可选） |
+| `IMAGE_GEN_SAMPLER` | 空 | a1111 `sampler_name`（可选，如 `Euler a`） |
 | `SONG_URL` | 空 | 配了就启用**真实点歌**。留空=点歌仅记录（不产音频） |
 | `SONG_KEY` | 空 | 点歌密钥；缺省回落到 `IMAGE_GEN_KEY` |
 | `SONG_METHOD` | `GET` | `GET`（默认，`?title=` 传参）或 `POST`（JSON `{title}`） |
@@ -67,28 +73,65 @@ interface MediaProvider {
 > 最小配置：只设 `IMAGE_GEN_URL`（+ `IMAGE_GEN_KEY`）就能「真出图」，点歌仍是本地记录。
 > 只设 `SONG_URL` 就能「真点歌」，出图仍是程序化 SVG。两个都设，两者都真。
 
-### 示例
+### 三种 IMAGE_GEN_KIND 启动示例
+
+**a1111（本地 Stable Diffusion WebUI / A1111）**
 
 ```bash
-# OpenAI 兼容 images 接口
+# WebUI 启动时加 --api 开启 API（默认监听 7860）
+#   ./webui.sh --api --listen          # 或 python launch.py --api --listen
+IMAGE_GEN_KIND=a1111
+IMAGE_GEN_URL=http://127.0.0.1:7860/sdapi/v1/txt2img
+IMAGE_GEN_STEPS=24
+IMAGE_GEN_WIDTH=640
+IMAGE_GEN_HEIGHT=400
+IMAGE_GEN_NEGATIVE=lowres, blurry, watermark
+# IMAGE_GEN_SAMPLER=Euler a
+# IMAGE_GEN_KEY=              # 本地一般不需要；若开了 --api-auth 就填
+```
+
+请求体：`{prompt, negative_prompt?, steps, width, height, sampler_name?}`；解析 `{images:[b64,...]}` 取第一张（PNG）。
+
+**openai（OpenAI 兼容 images）**
+
+```bash
+IMAGE_GEN_KIND=openai
 IMAGE_GEN_URL=https://api.openai.com/v1/images/generations
 IMAGE_GEN_KEY=sk-xxxx
 IMAGE_GEN_MODEL=gpt-image-1
 IMAGE_GEN_SIZE=1024x1024
-
-# OpenAI 兼容 audio/speech（返回 audio/mpeg 字节）
-SONG_URL=https://api.openai.com/v1/audio/speech
-SONG_METHOD=POST
-SONG_KEY=sk-xxxx
 ```
+
+请求体：`{prompt, n:1, size, response_format:'b64_json', model?}`；解析 `{data:[{b64_json}]}`。
+
+**generic（任意自定义本地服务，返回内联 b64）**
+
+```bash
+IMAGE_GEN_KIND=generic
+IMAGE_GEN_URL=http://127.0.0.1:9000/generate
+# IMAGE_GEN_MODEL=...   IMAGE_GEN_SIZE=...
+```
+
+请求体：`{prompt, style?, model?, size?}`；响应接受 `{b64|bytes|image}` 或 `{images:[b64]}`。
+
+**ComfyUI**：ComfyUI 原生 `/prompt` 是工作流队列式 API、非同步出图，本 provider 不内置其协议；推荐二选一：
+1) 在 ComfyUI 装 `ComfyUI-to-API` / `comfyui-api` 之类把工作流包成「POST 一段 JSON → 同步返回内联 b64」的 HTTP 服务，然后按 `IMAGE_GEN_KIND=generic` 配置；或
+2) 直接用 A1111 WebUI（`--api`）走 `a1111` kind，最省事。
+
+> 所有 kind 的共同安全约束：**只接受内联 `b64`/`bytes`，绝不 fetch 响应里的 url**（防 SSRF）；只允许栅格图 `png/jpeg/webp`，`svg/xml` 一律拒绝；超时/超限/失败回落程序化；key 只进 `Authorization` 头、不进日志。
 
 ---
 
 ## 3. 图片 provider 的请求 / 响应约定
 
-**请求**（默认 `POST`，`content-type: application/json`，带 `Authorization: Bearer <IMAGE_GEN_KEY>`）：
+**请求**（默认 `POST`，`content-type: application/json`，带 `Authorization: Bearer <IMAGE_GEN_KEY>`）—— body 随 `IMAGE_GEN_KIND` 变化：
 
-```json
+```jsonc
+// a1111
+{ "prompt": "…", "negative_prompt": "…", "steps": 20, "width": 512, "height": 512, "sampler_name": "…" }
+// openai
+{ "prompt": "…", "n": 1, "size": "1024x1024", "response_format": "b64_json", "model": "…" }
+// generic / auto
 { "prompt": "码头晚霞 — 一只橘猫 — style: photo", "style": "photo", "model": "…", "size": "…" }
 ```
 
@@ -101,8 +144,9 @@ SONG_KEY=sk-xxxx
    ```json
    { "data": [ { "b64_json": "iVBORw0K...", "mime_type": "image/png" } ] }
    ```
-3. **自定义 JSON**：`{ "b64_json" | "b64" | "base64" | "bytes" | "image": "…", "type" | "mime_type": "image/png" }`。
-4. 响应非 JSON 但带了图片字节（`application/octet-stream`）→ 按文件头嗅探 PNG/JPEG/WebP（**SVG 一律拒绝**）。
+3. **A1111 / 自定义 images 数组**：`{ "images": [ "<b64 png>", ... ] }` → 取第一张可用内联图。
+4. **自定义 JSON**：`{ "b64_json" | "b64" | "base64" | "bytes" | "image": "…", "type" | "mime_type": "image/png" }`。
+5. 响应非 JSON 但带了图片字节（`application/octet-stream`）→ 按文件头嗅探 PNG/JPEG/WebP（**SVG 一律拒绝**）。
 
 > **安全（H1 SSRF / M1 存储型 XSS）**：
 > - 响应里的 `url` / `image_url` **一律不被服务端 fetch**（防 SSRF 打 127/内网/169.254 云元数据），纯 URL 响应直接忽略 → 回落程序化。只接受内联 `b64/bytes`。
